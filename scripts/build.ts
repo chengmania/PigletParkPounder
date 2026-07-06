@@ -25,9 +25,15 @@ const START_HERE = `PigletDupeDodger -- quick start
 4. On every operator's laptop/tablet/phone, connect to the same WiFi network
    as the host, then open that URL in a browser (or scan the QR code).
    No install needed on any client.
-5. All QSOs are saved as they're logged into the fdlog-data/ folder next to
+5. Before the event: one person should visit <that URL>/captain (typed into
+   the address bar -- it's not linked from any operator screen) to set up
+   the Captain's Station login, club config, and bonus checklist. First
+   visit shows a one-time recovery code -- write it on this flash drive
+   label, it's the only way back in if the Captain password is forgotten.
+6. All QSOs are saved as they're logged into the fdlog-data/ folder next to
    the binary, on this flash drive. Don't delete that folder during the
-   event -- it's your only copy until you export at the end.
+   event -- it's your only copy until you export at the end (Captain's
+   Station has the exports and the full journal backup download).
 
 73, and may your dupes always be dodged!
 `;
