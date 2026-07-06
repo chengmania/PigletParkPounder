@@ -8,6 +8,7 @@ import { fillDatalist, workedCallOptions } from '../autocomplete.ts';
 import { describeDupe } from '../dupe-live.ts';
 import { buildIdentity } from '../log-model.ts';
 import { sortNewestFirst, toQsoRow } from '../qso-list-model.ts';
+import { mountSectionMap, type SectionMapHandle } from '../section-map.ts';
 import { mountSectionSelect, type SectionSelectHandle } from '../section-select.ts';
 import { store } from '../store.ts';
 import { onQsoAddOutcome, send } from '../ws-client.ts';
@@ -35,6 +36,7 @@ interface Els {
   yourRecent: HTMLElement;
   sessionCount: HTMLElement;
   callsDatalist: HTMLDataListElement;
+  sectionMap: SectionMapHandle;
 }
 
 let els: Els | null = null;
@@ -134,7 +136,14 @@ function buildForm(container: HTMLElement): void {
   dupeStatus.className = 'dupe-status';
   form.appendChild(dupeStatus);
 
-  root.appendChild(form);
+  const logLayout = document.createElement('div');
+  logLayout.className = 'log-layout';
+  logLayout.appendChild(form);
+  const mapContainer = document.createElement('div');
+  mapContainer.className = 'log-layout-map';
+  logLayout.appendChild(mapContainer);
+  root.appendChild(logLayout);
+  const sectionMap = mountSectionMap(mapContainer);
 
   const sessionCount = document.createElement('p');
   sessionCount.className = 'session-count';
@@ -179,6 +188,7 @@ function buildForm(container: HTMLElement): void {
     yourRecent,
     sessionCount,
     callsDatalist,
+    sectionMap,
   };
 
   lastReservationKeys = '\0force-rebuild'; // sentinel so the first updateDynamic() always (re)builds
@@ -416,6 +426,7 @@ function updateDynamic(): void {
 
   renderYourRecent();
   renderTicker();
+  els.sectionMap.update();
 }
 
 function renderYourRecent(): void {

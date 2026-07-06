@@ -687,3 +687,100 @@ input.invalid {
   margin: 0 auto;
   text-align: left;
 }
+
+/* ---- Log layout: entry form + section map side-by-side on desktop ---- */
+
+.log-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  align-items: flex-start;
+}
+
+@media (min-width: 900px) {
+  .log-layout {
+    flex-direction: row;
+  }
+
+  .log-layout .log-form {
+    flex: 1 1 420px;
+  }
+
+  .log-layout-map {
+    flex: 1 1 380px;
+    min-width: 0;
+  }
+}
+
+.section-map {
+  width: 100%;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 0.75rem;
+}
+
+.section-map-toggle {
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-weight: 700;
+  padding: 0.25rem 0;
+  min-height: auto;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+}
+
+.section-map-svg-holder {
+  width: 100%;
+  max-height: 420px;
+  overflow: auto;
+}
+
+.section-map-svg-holder svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.section-path-worked {
+  fill: var(--accent) !important;
+  fill-opacity: 0.35;
+}
+
+.section-pin {
+  fill: var(--text-muted);
+  fill-opacity: 0.5;
+  stroke: var(--surface);
+  stroke-width: 1;
+}
+
+.section-pin-active {
+  fill: var(--success);
+  fill-opacity: 0.9;
+}
+
+.section-map-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.section-map-badge {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 0.2rem 0.75rem;
+  font-size: 0.85rem;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+
+.section-map-badge-active {
+  background: var(--success);
+  color: var(--success-fg);
+  border-color: transparent;
+}
