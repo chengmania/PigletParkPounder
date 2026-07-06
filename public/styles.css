@@ -662,7 +662,7 @@ input.invalid {
    the Dashboard/Captain's Station copies, which are the primary place to
    view it full-size. */
 .log-map-container {
-  margin: 1.5rem 0;
+  margin: 1.5rem auto;
   max-width: 420px;
 }
 
