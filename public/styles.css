@@ -104,8 +104,11 @@ button:disabled {
   filter: none;
 }
 
+/* !important: this utility class must always win regardless of a more
+   specific or later-defined display rule on the same element (e.g.
+   .sat-fields sets display:flex). */
 .hidden {
-  display: none;
+  display: none !important;
 }
 
 /* ---- App shell: header, banner, nav, content ---- */
@@ -286,15 +289,122 @@ button:disabled {
 
 /* ---- Log screen ---- */
 
+.identity-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 0.6rem 1rem;
+  margin-bottom: 1rem;
+}
+
+.identity-bar span:not(.badge) + span:not(.badge)::before {
+  content: '|';
+  margin-right: 1rem;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.badge-gota {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
 .log-form {
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
-  max-width: 420px;
+  max-width: 100%;
 }
 
 .log-form button {
   min-height: var(--touch-min);
+}
+
+.log-entry-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: flex-start;
+}
+
+.log-entry-row .log-call-input {
+  flex: 1 1 100%;
+}
+
+.log-entry-row .section-select {
+  flex: 1 1 auto;
+}
+
+@media (min-width: 700px) {
+  .log-entry-row {
+    flex-wrap: nowrap;
+    align-items: center;
+  }
+
+  .log-entry-row .log-call-input {
+    flex: 2 1 auto;
+  }
+
+  .log-entry-row input:not(.log-call-input) {
+    flex: 1 1 auto;
+  }
+
+  .log-entry-row button {
+    flex: 0 0 auto;
+  }
+}
+
+.section-select {
+  position: relative;
+  width: 100%;
+}
+
+.section-select input {
+  width: 100%;
+}
+
+.section-select input.invalid {
+  border-color: var(--danger);
+}
+
+input.invalid {
+  border-color: var(--danger);
+}
+
+.section-select-list {
+  position: absolute;
+  z-index: 10;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin: 2px 0 0;
+  padding: 0.25rem;
+  list-style: none;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  max-height: 12rem;
+  overflow-y: auto;
+}
+
+.section-select-list li {
+  padding: 0.4rem 0.6rem;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-family: var(--font-mono);
+}
+
+.section-select-list li.highlighted {
+  background: var(--accent);
+  color: var(--accent-fg);
 }
 
 .sat-fields {

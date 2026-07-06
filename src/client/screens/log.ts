@@ -3,8 +3,10 @@ import { generateId } from '../../shared/id.ts';
 import type { Mode, Qso, Reservation, StationKind } from '../../shared/types.ts';
 import { isValidClass } from '../../shared/validate.ts';
 import { isValidSectionCode } from '../../shared/sections.ts';
-import { fillDatalist, sectionCodeOptions, workedCallOptions } from '../autocomplete.ts';
+import { fillDatalist, workedCallOptions } from '../autocomplete.ts';
 import { describeDupe } from '../dupe-live.ts';
+import { buildIdentity } from '../log-model.ts';
+import { mountSectionSelect, type SectionSelectHandle } from '../section-select.ts';
 import { store } from '../store.ts';
 import { onQsoAddOutcome, send } from '../ws-client.ts';
 
@@ -15,12 +17,13 @@ interface Context {
 }
 
 interface Els {
+  identityBar: HTMLElement;
   contextRow: HTMLElement;
   contextSelect: HTMLSelectElement | null;
   contextLabel: HTMLElement;
   callInput: HTMLInputElement;
   classInput: HTMLInputElement;
-  sectionInput: HTMLInputElement;
+  sectionSelect: SectionSelectHandle;
   satFields: HTMLElement;
   satNameInput: HTMLInputElement;
   satFmCheckbox: HTMLInputElement;
@@ -65,22 +68,31 @@ function buildForm(container: HTMLElement): void {
   title.textContent = 'Log a QSO';
   root.appendChild(title);
 
+  // Identity bar: reminds the operator who/what they are, always visible.
+  const identityBar = document.createElement('div');
+  identityBar.className = 'identity-bar';
+  root.appendChild(identityBar);
+
   const contextLabel = document.createElement('p');
   contextLabel.className = 'log-context';
   root.appendChild(contextLabel);
-
-  const form = document.createElement('form');
-  form.className = 'log-form';
 
   const contextRow = document.createElement('div');
   contextRow.className = 'log-context-select';
   root.appendChild(contextRow);
 
+  const form = document.createElement('form');
+  form.className = 'log-form';
+
+  const entryRow = document.createElement('div');
+  entryRow.className = 'log-entry-row';
+
   const callInput = document.createElement('input');
   callInput.placeholder = 'Callsign worked';
   callInput.autofocus = true;
   callInput.setAttribute('list', 'worked-calls');
-  form.appendChild(callInput);
+  callInput.className = 'log-call-input';
+  entryRow.appendChild(callInput);
 
   const callsDatalist = document.createElement('datalist');
   callsDatalist.id = 'worked-calls';
@@ -88,17 +100,18 @@ function buildForm(container: HTMLElement): void {
 
   const classInput = document.createElement('input');
   classInput.placeholder = 'Class (e.g. 3A)';
-  form.appendChild(classInput);
+  entryRow.appendChild(classInput);
 
-  const sectionInput = document.createElement('input');
-  sectionInput.placeholder = 'Section';
-  sectionInput.setAttribute('list', 'sections-list');
-  form.appendChild(sectionInput);
+  const sectionContainer = document.createElement('div');
+  entryRow.appendChild(sectionContainer);
+  const sectionSelect = mountSectionSelect(sectionContainer, { onChange: runDupeCheck });
 
-  const sectionsDatalist = document.createElement('datalist');
-  sectionsDatalist.id = 'sections-list';
-  fillDatalist(sectionsDatalist, sectionCodeOptions());
-  form.appendChild(sectionsDatalist);
+  const logBtn = document.createElement('button');
+  logBtn.type = 'submit';
+  logBtn.textContent = 'Log';
+  entryRow.appendChild(logBtn);
+
+  form.appendChild(entryRow);
 
   const satFields = document.createElement('div');
   satFields.className = 'sat-fields hidden';
@@ -116,11 +129,6 @@ function buildForm(container: HTMLElement): void {
   const dupeStatus = document.createElement('div');
   dupeStatus.className = 'dupe-status';
   form.appendChild(dupeStatus);
-
-  const logBtn = document.createElement('button');
-  logBtn.type = 'submit';
-  logBtn.textContent = 'Log';
-  form.appendChild(logBtn);
 
   root.appendChild(form);
 
@@ -145,12 +153,13 @@ function buildForm(container: HTMLElement): void {
   container.appendChild(root);
 
   els = {
+    identityBar,
     contextRow,
     contextSelect: null,
     contextLabel,
     callInput,
     classInput,
-    sectionInput,
+    sectionSelect,
     satFields,
     satNameInput,
     satFmCheckbox,
@@ -164,10 +173,17 @@ function buildForm(container: HTMLElement): void {
 
   lastReservationKeys = '\0force-rebuild'; // sentinel so the first updateDynamic() always (re)builds
 
-
   callInput.addEventListener('input', runDupeCheck);
   satNameInput.addEventListener('input', runDupeCheck);
   satFmCheckbox.addEventListener('change', runDupeCheck);
+
+  // Class validation is a soft warning, not a hard block on submit -- the
+  // server's INVALID_CLASS reject remains final authority (surfaced via the
+  // onQsoAddOutcome listener below). This just gives live visual feedback.
+  classInput.addEventListener('input', () => {
+    const value = classInput.value.trim();
+    classInput.classList.toggle('invalid', value !== '' && !isValidClass(value));
+  });
 
   form.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -177,7 +193,8 @@ function buildForm(container: HTMLElement): void {
     if (e.key === 'Escape') {
       callInput.value = '';
       classInput.value = '';
-      sectionInput.value = '';
+      classInput.classList.remove('invalid');
+      sectionSelect.setValue('');
       satNameInput.value = '';
       satFmCheckbox.checked = false;
       runDupeCheck();
@@ -218,8 +235,6 @@ function buildContextSelector(contextRow: HTMLElement): void {
   els.contextLabel.textContent = '';
 
   if (reservations.length === 1) {
-    const r = reservations[0]!;
-    els.contextLabel.textContent = `Logging as ${r.station} on ${r.band} ${r.mode}`;
     els.contextSelect = null;
   } else {
     const select = document.createElement('select');
@@ -232,6 +247,7 @@ function buildContextSelector(contextRow: HTMLElement): void {
     select.addEventListener('change', () => {
       toggleSatFields();
       runDupeCheck();
+      updateIdentityBar();
     });
     contextRow.appendChild(select);
     els.contextSelect = select;
@@ -252,6 +268,26 @@ function toggleSatFields(): void {
   if (!els) return;
   const ctx = getContext();
   els.satFields.classList.toggle('hidden', ctx?.band !== 'SAT');
+}
+
+function updateIdentityBar(): void {
+  if (!els) return;
+  const state = store.get();
+  const identity = buildIdentity(state.data.config, getContext());
+
+  els.identityBar.innerHTML = '';
+  const parts = [identity.callsign || '—', identity.entryClass || '—', identity.section || '—', identity.bandMode ?? '—'];
+  for (const part of parts) {
+    const span = document.createElement('span');
+    span.textContent = part;
+    els.identityBar.appendChild(span);
+  }
+  if (identity.isGota) {
+    const badge = document.createElement('span');
+    badge.className = 'badge badge-gota';
+    badge.textContent = 'GOTA';
+    els.identityBar.appendChild(badge);
+  }
 }
 
 function runDupeCheck(): void {
@@ -295,13 +331,8 @@ function submitQso(): void {
 
   const call = els.callInput.value.trim();
   const exchClass = els.classInput.value.trim().toUpperCase();
-  const exchSection = els.sectionInput.value.trim().toUpperCase();
+  const exchSection = els.sectionSelect.getValue().trim().toUpperCase();
   if (!call) return;
-  if (!isValidClass(exchClass)) {
-    els.dupeStatus.textContent = 'Invalid class format (e.g. 3A)';
-    els.dupeStatus.className = 'dupe-status dupe-blocked';
-    return;
-  }
   if (!isValidSectionCode(exchSection)) {
     els.dupeStatus.textContent = 'Invalid section code';
     els.dupeStatus.className = 'dupe-status dupe-blocked';
@@ -346,7 +377,8 @@ function submitQso(): void {
 
   els.callInput.value = '';
   els.classInput.value = '';
-  els.sectionInput.value = '';
+  els.classInput.classList.remove('invalid');
+  els.sectionSelect.setValue('');
   els.satNameInput.value = '';
   els.satFmCheckbox.checked = false;
   els.callInput.focus();
@@ -365,6 +397,8 @@ function updateDynamic(): void {
     lastReservationKeys = keys;
     buildContextSelector(els.contextRow);
   }
+
+  updateIdentityBar();
 
   const you = state.you;
   const yourCount = you ? [...state.data.qsos.values()].filter((q) => !q.deleted && q.operatorCall === you.call).length : 0;
