@@ -1,7 +1,7 @@
 import { networkInterfaces } from 'node:os';
 import { broadcast } from './broadcast.ts';
 import type { CommandDeps, ServerContext } from './commands.ts';
-import { serveStatic } from './http.ts';
+import { serveJournalBackup, serveStatic } from './http.ts';
 import { boot, writeSnapshot, writeSnapshotIfDue } from './journal-io.ts';
 import { makeWebSocketHandlers, upgradeIfWebSocket } from './ws.ts';
 
@@ -36,7 +36,7 @@ async function main() {
   const server = Bun.serve({
     port,
     fetch(req, srv) {
-      return upgradeIfWebSocket(req, srv) ?? serveStatic(req);
+      return upgradeIfWebSocket(req, srv) ?? serveJournalBackup(req, dataDir) ?? serveStatic(req);
     },
     websocket: wsHandlers,
   });

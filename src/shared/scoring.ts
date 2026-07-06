@@ -13,6 +13,7 @@ export interface ScoreBreakdown {
   perMode: Partial<Record<Mode, { count: number; qsoPoints: number }>>;
   perOperator: Record<string, { count: number; qsoPoints: number }>;
   ineligibleClaims: string[];
+  perBonus: Record<string, { claimed: boolean; eligible: boolean; pointsAwarded: number }>;
 }
 
 const MODE_POINTS: Record<Mode, number> = { PH: 1, CW: 2, DIG: 2 };
@@ -71,14 +72,21 @@ export function scoreLog(
   const multipliedPoints = qsoPoints * multiplier;
 
   const ineligibleClaims: string[] = [];
+  const perBonus: Record<string, { claimed: boolean; eligible: boolean; pointsAwarded: number }> = {};
   let bonusPoints = 0;
 
   for (const def of BONUS_CATALOG) {
     const claim = bonuses.get(def.id);
-    if (!claim?.claimed) continue;
+    const claimed = !!claim?.claimed;
+
+    if (!claimed) {
+      perBonus[def.id] = { claimed: false, eligible: isClassEligible(def, config.entryClass), pointsAwarded: 0 };
+      continue;
+    }
 
     if (!isClassEligible(def, config.entryClass)) {
       ineligibleClaims.push(def.id);
+      perBonus[def.id] = { claimed: true, eligible: false, pointsAwarded: 0 };
       continue;
     }
 
@@ -86,13 +94,17 @@ export function scoreLog(
       const coachedCount = eligible.filter((q) => q.station === 'GOTA' && q.gotaCoached).length;
       if (coachedCount < def.requiresGotaCoachCount) {
         ineligibleClaims.push(def.id);
+        perBonus[def.id] = { claimed: true, eligible: false, pointsAwarded: 0 };
         continue;
       }
       bonusPoints += def.points;
+      perBonus[def.id] = { claimed: true, eligible: true, pointsAwarded: def.points };
       continue;
     }
 
-    bonusPoints += computeBonusPoints(def, claim);
+    const awarded = computeBonusPoints(def, claim);
+    bonusPoints += awarded;
+    perBonus[def.id] = { claimed: true, eligible: true, pointsAwarded: awarded };
   }
 
   const youthBonus = computeYouthBonus(config.entryClass, eligible, operators);
@@ -112,6 +124,7 @@ export function scoreLog(
     perMode,
     perOperator,
     ineligibleClaims,
+    perBonus,
   };
 }
 

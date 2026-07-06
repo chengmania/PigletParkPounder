@@ -1,5 +1,6 @@
 import * as connectScreen from './screens/connect.ts';
 import * as dashboardScreen from './screens/dashboard.ts';
+import * as exportsScreen from './screens/exports.ts';
 import * as gridScreen from './screens/grid.ts';
 import * as hostSetupScreen from './screens/host-setup.ts';
 import * as logScreen from './screens/log.ts';
@@ -14,6 +15,7 @@ function navLinks(): Array<[string, string]> {
     ['#/grid', 'Grid'],
     ['#/log', 'Log'],
     ['#/dashboard', 'Dashboard'],
+    ['#/exports', 'Exports'],
   ];
   if (isHostMode()) links.push(['#/setup', 'Host Setup']);
   return links;
@@ -29,6 +31,8 @@ function currentScreen(): Screen {
       return logScreen;
     case '/dashboard':
       return dashboardScreen;
+    case '/exports':
+      return exportsScreen;
     case '/setup':
       return hostSetupScreen;
     case '/grid':

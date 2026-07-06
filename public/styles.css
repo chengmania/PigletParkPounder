@@ -347,3 +347,23 @@ h1 {
   color: var(--text-dim);
   font-size: 0.85rem;
 }
+
+.export-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  max-width: 300px;
+}
+
+.export-buttons button,
+.export-buttons a.export-link {
+  padding: 0.6rem 1rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-size: 1rem;
+  cursor: pointer;
+  text-align: center;
+  text-decoration: none;
+}
