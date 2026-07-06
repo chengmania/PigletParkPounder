@@ -6,6 +6,17 @@ any browser on the local WiFi network. No internet is ever required, at the site
 
 73, and may your dupes always be dodged.
 
+## Screenshots
+
+|                                                                          |                                                                                        |
+| ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| **Grid** -- claim a band/mode slot before transmitting on it              | **Log** -- entry row, live dupe check, and a collapsible section map                     |
+| ![Grid](docs/screenshots/grid.png)                                        | ![Log](docs/screenshots/operator-log.png)                                                |
+| **Captain's Station -- Score Summary**                                   | **Captain's Station -- Live QSOs** (the one view that shows deleted entries, struck through) |
+| ![Score Summary](docs/screenshots/captain-score.png)                      | ![Live QSOs](docs/screenshots/captain-live-qsos.png)                                      |
+| **Captain's Station -- Section Map** (full-size, always expanded)        | **Captain's Station -- Club Setup**                                                      |
+| ![Section Map](docs/screenshots/captain-section-map.png)                  | ![Club Setup](docs/screenshots/captain-club-setup.png)                                   |
+
 ## Tent-ready quick start
 
 1. **Copy the program onto whatever computer will act as the host** -- a laptop, desktop, or
@@ -110,4 +121,5 @@ public/              index.html, css, section-map.svg
 scripts/build.ts     cross-compile + dist/bundle/ packaging
 tests/
 docs/2026FieldDayRules.pdf
+docs/screenshots/     README gallery images
 ```
