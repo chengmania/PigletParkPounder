@@ -4,6 +4,7 @@ import * as exportsScreen from './screens/exports.ts';
 import * as gridScreen from './screens/grid.ts';
 import * as hostSetupScreen from './screens/host-setup.ts';
 import * as logScreen from './screens/log.ts';
+import { mountBanner, updateBanner } from './banner.ts';
 import { isHostMode } from './host-mode.ts';
 import { store } from './store.ts';
 import { connect } from './ws-client.ts';
@@ -43,6 +44,7 @@ function currentScreen(): Screen {
 
 const appRoot = document.getElementById('app')!;
 appRoot.innerHTML = '';
+mountBanner(appRoot);
 const nav = document.createElement('nav');
 nav.className = 'app-nav';
 const content = document.createElement('div');
@@ -64,6 +66,7 @@ function renderNav(): void {
 }
 
 function rerender(): void {
+  updateBanner(store.get().connection);
   renderNav();
   currentScreen().render(content);
 }

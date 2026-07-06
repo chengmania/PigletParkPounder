@@ -314,9 +314,15 @@ function submitQso(): void {
   const satelliteName = ctx.band === 'SAT' ? els.satNameInput.value.trim() || undefined : undefined;
   const satelliteSingleChannelFm = ctx.band === 'SAT' ? els.satFmCheckbox.checked : undefined;
 
+  // If we're offline right now, this QSO will sit in the outbox until
+  // reconnect -- flag it queued with our own timestamp so the server uses
+  // the time it actually happened rather than stamping arrival time later.
+  const offline = state.connection !== 'connected';
+  const clientTs = new Date().toISOString();
+
   const optimistic: Qso = {
     id: `pending:${clientId}`,
-    ts: new Date().toISOString(),
+    ts: clientTs,
     station: ctx.station,
     band: ctx.band,
     mode: ctx.mode,
@@ -326,6 +332,7 @@ function submitQso(): void {
     operatorCall: state.you.call,
     satelliteName,
     satelliteSingleChannelFm,
+    queued: offline,
   };
   pending.set(clientId, optimistic);
 
@@ -334,6 +341,8 @@ function submitQso(): void {
     clientId,
     qso: { station: ctx.station, band: ctx.band, mode: ctx.mode, call, exchClass, exchSection, satelliteName, satelliteSingleChannelFm },
     override,
+    queued: offline,
+    clientTs,
   });
 
   els.callInput.value = '';
@@ -399,7 +408,8 @@ function renderTicker(): void {
   for (const q of combined) {
     const li = document.createElement('li');
     const isPending = q.id.startsWith('pending:');
-    li.textContent = `${q.call} -- ${q.band}/${q.mode} (${q.station}) by ${q.operatorCall}${isPending ? ' (sending...)' : ''}`;
+    const suffix = isPending ? (q.queued ? ' (queued -- offline)' : ' (sending...)') : '';
+    li.textContent = `${q.call} -- ${q.band}/${q.mode} (${q.station}) by ${q.operatorCall}${suffix}`;
     if (isPending) li.className = 'ticker-pending';
     els.ticker.appendChild(li);
   }
