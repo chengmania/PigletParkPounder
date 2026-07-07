@@ -3,21 +3,32 @@
 // varies far more than a single regex can safely encode.
 export const CALLSIGN_REGEX = /^[A-Z0-9]{3,3}[A-Z0-9/]{0,7}$/;
 
-// Entry class, e.g. "3A", "1B", or the battery variants "1AB"/"1BB".
-//
-// This deliberately accepts a bare class letter (A-F) OR the two documented
-// Battery-suffix combinations AB/BB -- Class A or B stations claiming the
-// emergency-power/battery sub-designation. A simpler-looking pattern like
-// `^\d{1,2}[A-F]B?$` would also accept nonsense combos like "2DB"/"2EB"/
-// "2FB", which aren't real Field Day class/battery designations (D/E/F/C
-// stations' power source is already implied by their class letter). Keep
-// this exact pattern.
-export const CLASS_REGEX = /^\d{1,2}(?:AB|BB|[A-F])$/i;
+// POTA park reference: a 1-4 character entity/program prefix (e.g. "K", "VE",
+// "G", "JA"), a hyphen, and a 4-5 digit park number (e.g. "K-1234",
+// "VE-0001"). Deliberately permissive -- POTA's full prefix list spans every
+// participating DXCC entity plus special program prefixes, so this only
+// rejects obviously-malformed input.
+export const PARK_REGEX = /^[A-Z0-9]{1,4}-\d{4,5}$/;
 
 export function isValidCallsign(call: string): boolean {
   return CALLSIGN_REGEX.test(call.trim().toUpperCase());
 }
 
-export function isValidClass(entryClass: string): boolean {
-  return CLASS_REGEX.test(entryClass.trim());
+export function isValidParkNumber(park: string): boolean {
+  return PARK_REGEX.test(park.trim().toUpperCase());
+}
+
+// Splits a comma-separated park list (a station simultaneously activating
+// more than one overlapping park -- a park within a park, a trail crossing a
+// boundary, etc.) into its trimmed, uppercased segments.
+export function splitParkList(parks: string): string[] {
+  return parks
+    .split(',')
+    .map((p) => p.trim().toUpperCase())
+    .filter((p) => p.length > 0);
+}
+
+export function isValidParkList(parks: string): boolean {
+  const segments = splitParkList(parks);
+  return segments.length > 0 && segments.every(isValidParkNumber);
 }

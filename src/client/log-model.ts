@@ -2,10 +2,9 @@ import type { ClubConfig, Mode, StationKind } from '../shared/types.ts';
 
 export interface IdentityModel {
   callsign: string;
-  entryClass: string;
-  section: string;
+  station: string;
+  park: string;
   bandMode: string | null;
-  isGota: boolean;
 }
 
 export interface IdentityContext {
@@ -17,12 +16,11 @@ export interface IdentityContext {
 // Pure so the identity bar's content is directly testable without touching
 // the DOM.
 export function buildIdentity(config: ClubConfig | null, ctx: IdentityContext | null): IdentityModel {
-  const isGota = ctx?.station === 'GOTA';
+  const park = ctx ? (config?.stationParks[ctx.station]?.parkNumber ?? '') : '';
   return {
-    callsign: (isGota ? config?.gotaCall : config?.clubCall) ?? '',
-    entryClass: config?.entryClass ?? '',
-    section: config?.section ?? '',
+    callsign: config?.clubCall ?? '',
+    station: ctx?.station ?? '',
+    park,
     bandMode: ctx ? `${ctx.band} ${ctx.mode}` : null,
-    isGota,
   };
 }

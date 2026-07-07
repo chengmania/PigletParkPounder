@@ -7,9 +7,8 @@ function makeConfig(overrides: Partial<ClubConfig> = {}): ClubConfig {
   return {
     clubName: 'Test Club',
     clubCall: 'W1TEST',
-    entryClass: '3A',
-    section: 'EPA',
-    powerMult: 1,
+    stations: ['R01'],
+    stationParks: { R01: { parkNumber: 'K-1234' } },
     eventStartUtc: '2026-06-27T18:00:00.000Z',
     eventEndUtc: '2026-06-28T20:59:00.000Z',
     ...overrides,
@@ -20,13 +19,14 @@ function makeQso(overrides: Partial<Qso> = {}): Qso {
   return {
     id: 'q1',
     ts: '2026-06-27T19:00:00.000Z',
-    station: 'MAIN',
+    station: 'R01',
     band: '20m',
-    mode: 'PH',
+    mode: 'SSB',
     call: 'W1ABC',
-    exchClass: '3A',
-    exchSection: 'EPA',
     operatorCall: 'W1OP',
+    myPark: 'K-1234',
+    rstSent: '59',
+    rstRcvd: '59',
     ...overrides,
   };
 }
@@ -47,30 +47,21 @@ describe('fold', () => {
     expect(state.config?.clubName).toBe('Second');
   });
 
-  test('GOTA reservation is a singleton slot regardless of band', () => {
+  test('reservations are keyed per station+band+mode', () => {
     const events: JournalEvent[] = [
-      { type: 'slot:reserve', ts: 't1', band: '20m', mode: 'PH', station: 'GOTA', operatorCall: 'W1OP' },
-      { type: 'slot:reserve', ts: 't2', band: '40m', mode: 'CW', station: 'GOTA', operatorCall: 'W1OP' },
-    ];
-    const state = fold(events);
-    expect(state.reservations.size).toBe(1);
-    expect(state.reservations.get('GOTA')?.band).toBe('40m');
-  });
-
-  test('MAIN reservations are keyed per band+mode', () => {
-    const events: JournalEvent[] = [
-      { type: 'slot:reserve', ts: 't1', band: '20m', mode: 'PH', station: 'MAIN', operatorCall: 'W1OP' },
-      { type: 'slot:reserve', ts: 't2', band: '40m', mode: 'CW', station: 'MAIN', operatorCall: 'W1OP2' },
+      { type: 'slot:reserve', ts: 't1', band: '20m', mode: 'SSB', station: 'R01', operatorCall: 'W1OP' },
+      { type: 'slot:reserve', ts: 't2', band: '20m', mode: 'SSB', station: 'R02', operatorCall: 'W1OP2' },
     ];
     const state = fold(events);
     expect(state.reservations.size).toBe(2);
-    expect(state.reservations.get(reservationKey('MAIN', '20m', 'PH'))?.operatorCall).toBe('W1OP');
+    expect(state.reservations.get(reservationKey('R01', '20m', 'SSB'))?.operatorCall).toBe('W1OP');
+    expect(state.reservations.get(reservationKey('R02', '20m', 'SSB'))?.operatorCall).toBe('W1OP2');
   });
 
   test('slot:release removes the reservation', () => {
     const events: JournalEvent[] = [
-      { type: 'slot:reserve', ts: 't1', band: '20m', mode: 'PH', station: 'MAIN', operatorCall: 'W1OP' },
-      { type: 'slot:release', ts: 't2', band: '20m', mode: 'PH', station: 'MAIN' },
+      { type: 'slot:reserve', ts: 't1', band: '20m', mode: 'SSB', station: 'R01', operatorCall: 'W1OP' },
+      { type: 'slot:release', ts: 't2', band: '20m', mode: 'SSB', station: 'R01' },
     ];
     const state = fold(events);
     expect(state.reservations.size).toBe(0);
@@ -91,10 +82,10 @@ describe('fold', () => {
     const qso = makeQso();
     const events: JournalEvent[] = [
       { type: 'qso:add', ts: 't1', qso, clientId: 'c1' },
-      { type: 'qso:edit', ts: 't2', id: qso.id, patch: { exchSection: 'WPA' } },
+      { type: 'qso:edit', ts: 't2', id: qso.id, patch: { theirPark: 'K-9999' } },
     ];
     const state = fold(events);
-    expect(state.qsos.get(qso.id)?.exchSection).toBe('WPA');
+    expect(state.qsos.get(qso.id)?.theirPark).toBe('K-9999');
     expect(state.qsos.get(qso.id)?.call).toBe('W1ABC');
   });
 
@@ -102,11 +93,6 @@ describe('fold', () => {
     const qso = makeQso();
     const state = fold([{ type: 'qso:add', ts: 't1', qso, clientId: 'c1' }]);
     expect(state.qsoIdByClientId.get('c1')).toBe(qso.id);
-  });
-
-  test('bonus:set stores the claim by bonusId', () => {
-    const state = fold([{ type: 'bonus:set', ts: 't1', bonusId: 'satellite', claim: { claimed: true } }]);
-    expect(state.bonuses.get('satellite')?.claimed).toBe(true);
   });
 
   test('applyEvent does not mutate the input state', () => {

@@ -1,6 +1,6 @@
 import type { ClientMessage } from '../shared/protocol.ts';
 
-const STORAGE_KEY = 'pdd-outbox';
+const STORAGE_KEY = 'ppp-outbox';
 
 export function loadOutbox(): ClientMessage[] {
   try {

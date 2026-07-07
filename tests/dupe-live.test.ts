@@ -14,7 +14,7 @@ describe('describeDupe', () => {
   });
 
   test('DUPE with an exactDupe present includes operator, time, and band/mode in the detail', () => {
-    const exactDupe = makeQso({ operatorCall: 'W1FIRST', ts: '2026-06-27T19:05:00.000Z', band: '20m', mode: 'PH' });
+    const exactDupe = makeQso({ operatorCall: 'W1FIRST', ts: '2026-06-27T19:05:00.000Z', band: '20m', mode: 'SSB' });
     const result: DupeResult = { status: 'DUPE', workedElsewhere: [], exactDupe };
     const ui = describeDupe(result);
     expect(ui.label).toBe('DUPE');
@@ -23,13 +23,13 @@ describe('describeDupe', () => {
     expect(ui.blockedHard).toBe(false);
     expect(ui.workedElsewhereText).toContain('W1FIRST');
     expect(ui.workedElsewhereText).toContain('19:05 UTC');
-    expect(ui.workedElsewhereText).toContain('20m/PH');
+    expect(ui.workedElsewhereText).toContain('20m/SSB');
   });
 
   test('DUPE without an exactDupe falls back to the workedElsewhere summary', () => {
     const result: DupeResult = {
       status: 'DUPE',
-      workedElsewhere: [{ band: '40m', mode: 'CW', ts: 't', by: 'W1OTHER', station: 'MAIN' }],
+      workedElsewhere: [{ band: '40m', mode: 'CW', ts: 't', by: 'W1OTHER' }],
     };
     const ui = describeDupe(result);
     expect(ui.workedElsewhereText).toContain('40m/CW');
@@ -37,13 +37,6 @@ describe('describeDupe', () => {
 
   test('BLOCKED_SELF is never overridable', () => {
     const result: DupeResult = { status: 'BLOCKED_SELF', workedElsewhere: [] };
-    const ui = describeDupe(result);
-    expect(ui.blockedHard).toBe(true);
-    expect(ui.requiresOverride).toBe(false);
-  });
-
-  test('BLOCKED_SAT_LIMIT is never overridable', () => {
-    const result: DupeResult = { status: 'BLOCKED_SAT_LIMIT', workedElsewhere: [] };
     const ui = describeDupe(result);
     expect(ui.blockedHard).toBe(true);
     expect(ui.requiresOverride).toBe(false);

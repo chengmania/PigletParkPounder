@@ -1,29 +1,52 @@
 import { describe, expect, test } from 'bun:test';
-import { isValidCallsign, isValidClass } from '../src/shared/validate.ts';
+import { isValidCallsign, isValidParkList, isValidParkNumber, splitParkList } from '../src/shared/validate.ts';
 
-describe('isValidClass', () => {
-  test('accepts a bare class letter', () => {
-    expect(isValidClass('3A')).toBe(true);
-    expect(isValidClass('1D')).toBe(true);
-    expect(isValidClass('1B')).toBe(true);
-  });
-
-  test('accepts the documented AB/BB battery-suffix combinations', () => {
-    expect(isValidClass('1AB')).toBe(true);
-    expect(isValidClass('2BB')).toBe(true);
-  });
-
-  test('rejects nonsense battery-suffix combos that are not real FD designations', () => {
-    expect(isValidClass('2CB')).toBe(false);
-    expect(isValidClass('2DB')).toBe(false);
-    expect(isValidClass('2EB')).toBe(false);
-    expect(isValidClass('2FB')).toBe(false);
+describe('isValidParkNumber', () => {
+  test('accepts plausible POTA park references', () => {
+    expect(isValidParkNumber('K-1234')).toBe(true);
+    expect(isValidParkNumber('VE-0001')).toBe(true);
+    expect(isValidParkNumber('G-12345')).toBe(true);
+    expect(isValidParkNumber('k-1234')).toBe(true);
   });
 
   test('rejects garbage', () => {
-    expect(isValidClass('')).toBe(false);
-    expect(isValidClass('3Z')).toBe(false);
-    expect(isValidClass('A3')).toBe(false);
+    expect(isValidParkNumber('')).toBe(false);
+    expect(isValidParkNumber('K1234')).toBe(false);
+    expect(isValidParkNumber('K-12')).toBe(false);
+    expect(isValidParkNumber('TOOLONGPREFIX-1234')).toBe(false);
+  });
+});
+
+describe('splitParkList', () => {
+  test('splits, trims, and uppercases comma-separated parks', () => {
+    expect(splitParkList('k-1234, k-5678')).toEqual(['K-1234', 'K-5678']);
+  });
+
+  test('single park -> single-element array', () => {
+    expect(splitParkList('K-1234')).toEqual(['K-1234']);
+  });
+
+  test('empty segments are dropped', () => {
+    expect(splitParkList('K-1234,,K-5678,')).toEqual(['K-1234', 'K-5678']);
+  });
+});
+
+describe('isValidParkList', () => {
+  test('accepts a single valid park', () => {
+    expect(isValidParkList('K-1234')).toBe(true);
+  });
+
+  test('accepts multiple valid comma-separated parks (simultaneous multi-park activation)', () => {
+    expect(isValidParkList('K-1234, K-5678')).toBe(true);
+  });
+
+  test('rejects if any segment is invalid', () => {
+    expect(isValidParkList('K-1234, not-a-park')).toBe(false);
+  });
+
+  test('rejects empty input', () => {
+    expect(isValidParkList('')).toBe(false);
+    expect(isValidParkList(',,,')).toBe(false);
   });
 });
 

@@ -1,19 +1,8 @@
-import { toCabrilloLog } from '../../shared/export/cabrillo.ts';
+import { groupForSubmission } from '../../shared/export/adif.ts';
 import { toDupeSheetCsv, toDupeSheetHtml } from '../../shared/export/dupesheet.ts';
 import { toSummaryReport } from '../../shared/export/summary.ts';
+import { downloadBlob, exportButton } from '../download.ts';
 import { store } from '../store.ts';
-
-function downloadBlob(filename: string, content: string, mimeType: string): void {
-  const blob = new Blob([content], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
 
 export function mountCaptainExports(container: HTMLElement): void {
   container.innerHTML = '';
@@ -30,7 +19,7 @@ export function mountCaptainExports(container: HTMLElement): void {
 
   if (!config) {
     const msg = document.createElement('p');
-    msg.textContent = 'Event not configured yet -- set up the club config first.';
+    msg.textContent = 'Club not configured yet -- set up the club config first.';
     root.appendChild(msg);
     container.appendChild(root);
     return;
@@ -42,33 +31,43 @@ export function mountCaptainExports(container: HTMLElement): void {
   const buttons = document.createElement('div');
   buttons.className = 'export-buttons';
 
-  buttons.appendChild(
-    exportButton('Dupe Sheet (HTML)', () => downloadBlob('dupe-sheet.html', toDupeSheetHtml(qsos), 'text/html')),
-  );
+  buttons.appendChild(exportButton('Dupe Sheet (HTML)', () => downloadBlob('dupe-sheet.html', toDupeSheetHtml(qsos), 'text/html')));
   buttons.appendChild(exportButton('Dupe Sheet (CSV)', () => downloadBlob('dupe-sheet.csv', toDupeSheetCsv(qsos), 'text/csv')));
   buttons.appendChild(
-    exportButton('Cabrillo Log', () => downloadBlob('fieldday.log', toCabrilloLog(qsos, config), 'text/plain')),
-  );
-  buttons.appendChild(
     exportButton('Summary Report (JSON)', () => {
-      const report = toSummaryReport(qsos, config, state.data.bonuses, operators);
+      const report = toSummaryReport(qsos, operators);
       downloadBlob('summary.json', JSON.stringify(report, null, 2), 'application/json');
     }),
   );
+
+  root.appendChild(buttons);
+
+  // Guide section 5: submissions are "1 log per park and state", filed as
+  // <clubcall>@<park>-<yyyymmdd>.adi -- one download button per group so
+  // the Captain doesn't have to hand-split the log themselves.
+  const adifTitle = document.createElement('h2');
+  adifTitle.textContent = 'ADIF (for POTA submission)';
+  root.appendChild(adifTitle);
+
+  const groups = groupForSubmission(qsos, config.clubCall);
+  if (groups.length === 0) {
+    const none = document.createElement('p');
+    none.textContent = 'No QSOs logged yet.';
+    root.appendChild(none);
+  } else {
+    const adifButtons = document.createElement('div');
+    adifButtons.className = 'export-buttons';
+    for (const group of groups) {
+      adifButtons.appendChild(exportButton(group.filename, () => downloadBlob(group.filename, group.content, 'text/plain')));
+    }
+    root.appendChild(adifButtons);
+  }
 
   const journalLink = document.createElement('a');
   journalLink.href = '/journal.jsonl';
   journalLink.textContent = 'Download Full Journal Backup';
   journalLink.className = 'export-link';
-  buttons.appendChild(journalLink);
+  root.appendChild(journalLink);
 
-  root.appendChild(buttons);
   container.appendChild(root);
-}
-
-function exportButton(label: string, onClick: () => void): HTMLButtonElement {
-  const btn = document.createElement('button');
-  btn.textContent = label;
-  btn.addEventListener('click', onClick);
-  return btn;
 }

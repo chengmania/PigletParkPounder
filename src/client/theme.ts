@@ -1,7 +1,7 @@
-const STORAGE_KEY = 'pdd-theme';
+const STORAGE_KEY = 'ppp-theme';
 
 // Pure: dark is always the default when nothing (or garbage) is stored --
-// overnight Field Day operating means dark should never require a choice.
+// early-morning and dusk activations mean dark should never require a choice.
 export function resolveTheme(stored: string | null): 'light' | 'dark' {
   return stored === 'light' ? 'light' : 'dark';
 }

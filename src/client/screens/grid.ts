@@ -1,22 +1,23 @@
 import { BANDS } from '../../shared/bands.ts';
 import { reservationKey } from '../../shared/journal.ts';
-import type { Mode, Reservation } from '../../shared/types.ts';
+import { MODES } from '../../shared/modes.ts';
+import type { Reservation, StationParkAssignment } from '../../shared/types.ts';
+import { splitParkList } from '../../shared/validate.ts';
 import { store } from '../store.ts';
 import { send } from '../ws-client.ts';
 
-const MODES: Mode[] = ['PH', 'CW', 'DIG'];
-
 export interface ReservationTableOpts {
   readOnly: boolean;
-  onClaim?: (band: string, mode: Mode) => void;
-  onRelease?: (band: string, mode: Mode) => void;
+  onClaim?: (band: string, mode: string) => void;
+  onRelease?: (band: string, mode: string) => void;
 }
 
 // Shared between the operator grid screen (readOnly:false, wired to
 // reserve/release) and the Captain's Station read-only grid monitor
-// (readOnly:true, no handlers) -- one table-building implementation so the
-// two views can't silently drift.
+// (readOnly:true, no handlers) -- one table-building implementation per
+// station so the two views can't silently drift.
 export function buildReservationTable(
+  station: string,
   reservations: ReadonlyMap<string, Reservation>,
   you: string | null,
   opts: ReservationTableOpts,
@@ -29,7 +30,7 @@ export function buildReservationTable(
   headRow.appendChild(document.createElement('th'));
   for (const mode of MODES) {
     const th = document.createElement('th');
-    th.textContent = mode;
+    th.textContent = mode.label;
     headRow.appendChild(th);
   }
   thead.appendChild(headRow);
@@ -43,15 +44,15 @@ export function buildReservationTable(
     row.appendChild(label);
 
     for (const mode of MODES) {
-      const key = reservationKey('MAIN', band.id, mode);
+      const key = reservationKey(station, band.id, mode.id);
       const reservation = reservations.get(key);
       const holder = reservation?.operatorCall ?? null;
       const onClaim = () => {
         if (reservation) return; // occupied, ignore click (handled via release button in cell)
-        opts.onClaim?.(band.id, mode);
+        opts.onClaim?.(band.id, mode.id);
       };
       const onRelease =
-        !opts.readOnly && reservation && reservation.operatorCall === you ? () => opts.onRelease?.(band.id, mode) : undefined;
+        !opts.readOnly && reservation && reservation.operatorCall === you ? () => opts.onRelease?.(band.id, mode.id) : undefined;
       row.appendChild(makeCell(holder, opts.readOnly ? null : you, onClaim, onRelease, opts.readOnly));
     }
     tbody.appendChild(row);
@@ -60,66 +61,14 @@ export function buildReservationTable(
   return table;
 }
 
-export function buildGotaSection(
-  reservations: ReadonlyMap<string, Reservation>,
-  you: string | null,
-  opts: { readOnly: boolean; onClaim?: (band: string, mode: Mode) => void; onRelease?: () => void },
-): HTMLElement {
-  const gotaSection = document.createElement('div');
-  gotaSection.className = 'gota-slot';
-  const gotaTitle = document.createElement('h2');
-  gotaTitle.textContent = 'GOTA (one signal at a time, Rule 4.1.1)';
-  gotaSection.appendChild(gotaTitle);
-
-  const gotaReservation = reservations.get('GOTA');
-  const gotaControls = document.createElement('div');
-  gotaControls.className = 'gota-controls';
-
-  if (gotaReservation && gotaReservation.operatorCall === you) {
-    const status = document.createElement('span');
-    status.className = 'cell cell-yours';
-    status.textContent = `You (${gotaReservation.band} ${gotaReservation.mode})`;
-    gotaControls.appendChild(status);
-    if (!opts.readOnly) {
-      const releaseBtn = document.createElement('button');
-      releaseBtn.textContent = 'Release GOTA';
-      releaseBtn.addEventListener('click', () => opts.onRelease?.());
-      gotaControls.appendChild(releaseBtn);
-    }
-  } else if (gotaReservation) {
-    const status = document.createElement('span');
-    status.className = 'cell cell-taken';
-    status.textContent = `${gotaReservation.operatorCall} (${gotaReservation.band} ${gotaReservation.mode})`;
-    gotaControls.appendChild(status);
-  } else if (opts.readOnly) {
-    const status = document.createElement('span');
-    status.className = 'cell cell-open';
-    status.textContent = 'Open';
-    gotaControls.appendChild(status);
-  } else {
-    const bandSelect = document.createElement('select');
-    for (const band of BANDS) {
-      const opt = document.createElement('option');
-      opt.value = band.id;
-      opt.textContent = band.label;
-      bandSelect.appendChild(opt);
-    }
-    const modeSelect = document.createElement('select');
-    for (const mode of MODES) {
-      const opt = document.createElement('option');
-      opt.value = mode;
-      opt.textContent = mode;
-      modeSelect.appendChild(opt);
-    }
-    const claimBtn = document.createElement('button');
-    claimBtn.textContent = 'Claim GOTA';
-    claimBtn.addEventListener('click', () => {
-      opts.onClaim?.(bandSelect.value, modeSelect.value as Mode);
-    });
-    gotaControls.append(bandSelect, modeSelect, claimBtn);
-  }
-  gotaSection.appendChild(gotaControls);
-  return gotaSection;
+function stationHeading(stationId: string, assignment: StationParkAssignment | undefined): HTMLElement {
+  const heading = document.createElement('h2');
+  heading.className = 'grid-station-heading';
+  const parks = assignment ? splitParkList(assignment.parkNumber).join(', ') : '';
+  const parkText = assignment ? `${parks}${assignment.parkName ? ` (${assignment.parkName})` : ''}` : 'no park assigned';
+  const stateText = assignment?.state ? `, ${assignment.state}` : '';
+  heading.textContent = `${stationId} — ${parkText}${stateText}`;
+  return heading;
 }
 
 // Grid has no focusable text inputs holding in-progress user typing, so
@@ -128,6 +77,7 @@ export function buildGotaSection(
 export function render(container: HTMLElement, _isNewMount: boolean): void {
   const state = store.get();
   const you = state.you?.call ?? null;
+  const config = state.data.config;
   container.innerHTML = '';
 
   const wrapper = document.createElement('div');
@@ -137,21 +87,23 @@ export function render(container: HTMLElement, _isNewMount: boolean): void {
   title.textContent = 'Band / Mode Reservations';
   wrapper.appendChild(title);
 
-  wrapper.appendChild(
-    buildReservationTable(state.data.reservations, you, {
-      readOnly: false,
-      onClaim: (band, mode) => send({ type: 'reserve', band, mode, station: 'MAIN' }),
-      onRelease: (band, mode) => send({ type: 'release', station: 'MAIN', band, mode }),
-    }),
-  );
+  const stations = config?.stations ?? [];
+  if (stations.length === 0) {
+    const msg = document.createElement('p');
+    msg.textContent = 'No stations configured yet -- ask your Captain to set up the club config.';
+    wrapper.appendChild(msg);
+  }
 
-  wrapper.appendChild(
-    buildGotaSection(state.data.reservations, you, {
-      readOnly: false,
-      onClaim: (band, mode) => send({ type: 'reserve', band, mode, station: 'GOTA' }),
-      onRelease: () => send({ type: 'release', station: 'GOTA' }),
-    }),
-  );
+  for (const stationId of stations) {
+    wrapper.appendChild(stationHeading(stationId, config?.stationParks[stationId]));
+    wrapper.appendChild(
+      buildReservationTable(stationId, state.data.reservations, you, {
+        readOnly: false,
+        onClaim: (band, mode) => send({ type: 'reserve', band, mode, station: stationId }),
+        onRelease: (band, mode) => send({ type: 'release', station: stationId, band, mode }),
+      }),
+    );
+  }
 
   container.appendChild(wrapper);
 }

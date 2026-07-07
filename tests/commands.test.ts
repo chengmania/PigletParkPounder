@@ -2,30 +2,24 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  buildFullState,
-  dispatch,
-  type CommandDeps,
-  type Connection,
-  type ServerContext,
-} from '../src/server/commands.ts';
+import { buildFullState, dispatch, type CommandDeps, type Connection, type ServerContext } from '../src/server/commands.ts';
 import { createInitialState } from '../src/shared/journal.ts';
-import type { ClientMessage, ServerMessage } from '../src/shared/protocol.ts';
-import type { NewQsoInput } from '../src/shared/protocol.ts';
+import type { ClientMessage, NewQsoInput, ServerMessage } from '../src/shared/protocol.ts';
 
 const dirsToClean: string[] = [];
 
 async function makeDeps(): Promise<CommandDeps> {
-  const dataDir = await mkdtemp(join(tmpdir(), 'pdd-commands-'));
+  const dataDir = await mkdtemp(join(tmpdir(), 'ppp-commands-'));
   dirsToClean.push(dataDir);
   const ctx: ServerContext = { dataDir, state: createInitialState(), seq: 0, admin: null };
   ctx.state.config = {
     clubName: 'Test Club',
     clubCall: 'W1CLUB',
-    gotaCall: 'W1GOTA',
-    entryClass: '3A',
-    section: 'EPA',
-    powerMult: 1,
+    stations: ['R01', 'R02'],
+    stationParks: {
+      R01: { parkNumber: 'K-1234', state: 'PA' },
+      R02: { parkNumber: 'K-5678', state: 'NY' },
+    },
     eventStartUtc: '2020-01-01T00:00:00.000Z',
     eventEndUtc: '2099-01-01T00:00:00.000Z',
   };
@@ -48,12 +42,12 @@ function makeAdminConn(): Connection & { sent: ServerMessage[] } {
 
 function newQso(overrides: Partial<NewQsoInput> = {}): NewQsoInput {
   return {
-    station: 'MAIN',
+    station: 'R01',
     band: '20m',
-    mode: 'PH',
+    mode: 'SSB',
     call: 'W2ABC',
-    exchClass: '3A',
-    exchSection: 'EPA',
+    rstSent: '59',
+    rstRcvd: '59',
     ...overrides,
   };
 }
@@ -92,10 +86,25 @@ describe('qso:add', () => {
     expect((lastRejects(conn)[0] as any).reason).toBe('NOT_YOUR_SLOT');
   });
 
+  test('rejects an unrecognized station', async () => {
+    const deps = await makeDeps();
+    const conn = await signIn(deps, 'W1OP');
+    await dispatch(deps, conn, { type: 'qso:add', clientId: 'c1', qso: newQso({ station: 'R99' }) });
+    expect((lastRejects(conn)[0] as any).reason).toBe('INVALID_STATION');
+  });
+
+  test('rejects a malformed park number for theirPark', async () => {
+    const deps = await makeDeps();
+    const conn = await signIn(deps, 'W1OP');
+    await dispatch(deps, conn, { type: 'reserve', band: '20m', mode: 'SSB', station: 'R01' });
+    await dispatch(deps, conn, { type: 'qso:add', clientId: 'c1', qso: newQso({ theirPark: 'not-a-park' }) });
+    expect((lastRejects(conn)[0] as any).reason).toBe('INVALID_PARK');
+  });
+
   test('idempotent double-send with the same clientId does not duplicate the QSO', async () => {
     const deps = await makeDeps();
     const conn = await signIn(deps, 'W1OP');
-    await dispatch(deps, conn, { type: 'reserve', band: '20m', mode: 'PH', station: 'MAIN' });
+    await dispatch(deps, conn, { type: 'reserve', band: '20m', mode: 'SSB', station: 'R01' });
 
     const msg: ClientMessage = { type: 'qso:add', clientId: 'dup1', qso: newQso() };
     await dispatch(deps, conn, msg);
@@ -107,7 +116,7 @@ describe('qso:add', () => {
   test('BLOCKED_SELF is never overridable', async () => {
     const deps = await makeDeps();
     const conn = await signIn(deps, 'W1OP');
-    await dispatch(deps, conn, { type: 'reserve', band: '20m', mode: 'PH', station: 'MAIN' });
+    await dispatch(deps, conn, { type: 'reserve', band: '20m', mode: 'SSB', station: 'R01' });
     await dispatch(deps, conn, {
       type: 'qso:add',
       clientId: 'c1',
@@ -121,7 +130,7 @@ describe('qso:add', () => {
   test('a plain dupe requires override to succeed', async () => {
     const deps = await makeDeps();
     const conn = await signIn(deps, 'W1OP');
-    await dispatch(deps, conn, { type: 'reserve', band: '20m', mode: 'PH', station: 'MAIN' });
+    await dispatch(deps, conn, { type: 'reserve', band: '20m', mode: 'SSB', station: 'R01' });
     await dispatch(deps, conn, { type: 'qso:add', clientId: 'c1', qso: newQso() });
     expect(deps.ctx.state.qsos.size).toBe(1);
 
@@ -133,10 +142,22 @@ describe('qso:add', () => {
     expect(deps.ctx.state.qsos.size).toBe(2);
   });
 
-  test('overriding a DUPE persists dupe:true on the stored QSO (CO-8)', async () => {
+  test('the same hunter/band/mode/day logged from a different station is still a club-wide dupe', async () => {
+    const deps = await makeDeps();
+    const connA = await signIn(deps, 'W1OP');
+    await dispatch(deps, connA, { type: 'reserve', band: '20m', mode: 'SSB', station: 'R01' });
+    await dispatch(deps, connA, { type: 'qso:add', clientId: 'c1', qso: newQso({ station: 'R01' }) });
+
+    const connB = await signIn(deps, 'W2OP');
+    await dispatch(deps, connB, { type: 'reserve', band: '20m', mode: 'SSB', station: 'R02' });
+    await dispatch(deps, connB, { type: 'qso:add', clientId: 'c2', qso: newQso({ station: 'R02' }) });
+    expect((lastRejects(connB)[0] as any).reason).toBe('DUPE_CONFIRM_REQUIRED');
+  });
+
+  test('overriding a DUPE persists dupe:true on the stored QSO', async () => {
     const deps = await makeDeps();
     const conn = await signIn(deps, 'W1OP');
-    await dispatch(deps, conn, { type: 'reserve', band: '20m', mode: 'PH', station: 'MAIN' });
+    await dispatch(deps, conn, { type: 'reserve', band: '20m', mode: 'SSB', station: 'R01' });
     await dispatch(deps, conn, { type: 'qso:add', clientId: 'c1', qso: newQso() });
     await dispatch(deps, conn, { type: 'qso:add', clientId: 'c2', qso: newQso(), override: true });
 
@@ -146,54 +167,32 @@ describe('qso:add', () => {
     expect(deps.ctx.state.qsos.get(secondId)?.dupe).toBe(true);
   });
 
-  test('a NEW qso has no dupe flag', async () => {
+  test('a NEW qso has no dupe flag and is stamped with its station\'s park', async () => {
     const deps = await makeDeps();
     const conn = await signIn(deps, 'W1OP');
-    await dispatch(deps, conn, { type: 'reserve', band: '20m', mode: 'PH', station: 'MAIN' });
+    await dispatch(deps, conn, { type: 'reserve', band: '20m', mode: 'SSB', station: 'R01' });
     await dispatch(deps, conn, { type: 'qso:add', clientId: 'c1', qso: newQso() });
     const qso = [...deps.ctx.state.qsos.values()][0];
     expect(qso?.dupe).toBeFalsy();
+    expect(qso?.myPark).toBe('K-1234');
+    expect(qso?.myState).toBe('PA');
   });
 
-  test('satellite QSO auto-claims the satellite bonus', async () => {
+  test('a park-to-park QSO carries theirPark through to the stored QSO', async () => {
     const deps = await makeDeps();
     const conn = await signIn(deps, 'W1OP');
-    await dispatch(deps, conn, { type: 'reserve', band: 'SAT', mode: 'PH', station: 'MAIN' });
-    await dispatch(deps, conn, {
-      type: 'qso:add',
-      clientId: 'c1',
-      qso: newQso({ band: 'SAT', satelliteName: 'SO-50', satelliteSingleChannelFm: true }),
-    });
-    expect(deps.ctx.state.bonuses.get('satellite')?.claimed).toBe(true);
-  });
-
-  test('single-channel-FM satellite limit blocks a second QSO on the same satellite', async () => {
-    const deps = await makeDeps();
-    const connA = await signIn(deps, 'W1OP');
-    await dispatch(deps, connA, { type: 'reserve', band: 'SAT', mode: 'PH', station: 'MAIN' });
-    await dispatch(deps, connA, {
-      type: 'qso:add',
-      clientId: 'c1',
-      qso: newQso({ call: 'W2XYZ', band: 'SAT', satelliteName: 'SO-50', satelliteSingleChannelFm: true }),
-    });
-    await dispatch(deps, connA, { type: 'release', station: 'MAIN', band: 'SAT', mode: 'PH' });
-
-    const connB = await signIn(deps, 'W1OP2');
-    await dispatch(deps, connB, { type: 'reserve', band: 'SAT', mode: 'PH', station: 'MAIN' });
-    await dispatch(deps, connB, {
-      type: 'qso:add',
-      clientId: 'c2',
-      qso: newQso({ call: 'W3DEF', band: 'SAT', satelliteName: 'SO-50', satelliteSingleChannelFm: true }),
-    });
-    expect((lastRejects(connB)[0] as any).reason).toBe('SAT_LIMIT');
+    await dispatch(deps, conn, { type: 'reserve', band: '20m', mode: 'SSB', station: 'R01' });
+    await dispatch(deps, conn, { type: 'qso:add', clientId: 'c1', qso: newQso({ theirPark: 'k-9999' }) });
+    const qso = [...deps.ctx.state.qsos.values()][0];
+    expect(qso?.theirPark).toBe('K-9999');
   });
 });
 
-describe('qso:edit dupe recompute (CO-8)', () => {
-  test('editing a dupe-flagged QSO\'s call to a fresh value clears the flag', async () => {
+describe('qso:edit dupe recompute', () => {
+  test("editing a dupe-flagged QSO's call to a fresh value clears the flag", async () => {
     const deps = await makeDeps();
     const conn = await signIn(deps, 'W1OP');
-    await dispatch(deps, conn, { type: 'reserve', band: '20m', mode: 'PH', station: 'MAIN' });
+    await dispatch(deps, conn, { type: 'reserve', band: '20m', mode: 'SSB', station: 'R01' });
     await dispatch(deps, conn, { type: 'qso:add', clientId: 'c1', qso: newQso({ call: 'W2ABC' }) });
     await dispatch(deps, conn, { type: 'qso:add', clientId: 'c2', qso: newQso({ call: 'W2ABC' }), override: true });
 
@@ -205,55 +204,66 @@ describe('qso:edit dupe recompute (CO-8)', () => {
     expect(deps.ctx.state.qsos.get(dupeId)?.call).toBe('W3FRESH');
   });
 
-  test('editing a clean QSO\'s call into collision with another QSO sets the flag', async () => {
+  test("editing a clean QSO's call into collision with another QSO sets the flag", async () => {
     const deps = await makeDeps();
     const conn = await signIn(deps, 'W1OP');
-    await dispatch(deps, conn, { type: 'reserve', band: '20m', mode: 'PH', station: 'MAIN' });
+    await dispatch(deps, conn, { type: 'reserve', band: '20m', mode: 'SSB', station: 'R01' });
     await dispatch(deps, conn, { type: 'qso:add', clientId: 'c1', qso: newQso({ call: 'W2ABC' }) });
-    // A different call on the same band/mode/station is not a dupe of c1 --
-    // dupe keys are per-callsign, not per-slot -- so this logs clean.
     await dispatch(deps, conn, { type: 'qso:add', clientId: 'c2', qso: newQso({ call: 'W3OTHER' }) });
 
     const cleanId = deps.ctx.state.qsoIdByClientId.get('c2')!;
     expect(deps.ctx.state.qsos.get(cleanId)?.dupe).toBeFalsy();
 
-    // Now edit c2's call to collide with c1's -- this should flag it.
     await dispatch(deps, conn, { type: 'qso:edit', id: cleanId, patch: { call: 'W2ABC' } });
     expect(deps.ctx.state.qsos.get(cleanId)?.dupe).toBe(true);
   });
 
-  test('editing only class/section (no call/band/mode) leaves the dupe flag untouched', async () => {
+  test('adding theirPark on edit recomputes the dupe flag', async () => {
     const deps = await makeDeps();
     const conn = await signIn(deps, 'W1OP');
-    await dispatch(deps, conn, { type: 'reserve', band: '20m', mode: 'PH', station: 'MAIN' });
+    await dispatch(deps, conn, { type: 'reserve', band: '20m', mode: 'SSB', station: 'R01' });
     await dispatch(deps, conn, { type: 'qso:add', clientId: 'c1', qso: newQso({ call: 'W2ABC' }) });
     await dispatch(deps, conn, { type: 'qso:add', clientId: 'c2', qso: newQso({ call: 'W2ABC' }), override: true });
 
     const dupeId = deps.ctx.state.qsoIdByClientId.get('c2')!;
-    await dispatch(deps, conn, { type: 'qso:edit', id: dupeId, patch: { exchSection: 'WPA' } });
+    // Turns out the second contact was actually park-to-park from a
+    // different park -- editing in theirPark should un-dupe it.
+    await dispatch(deps, conn, { type: 'qso:edit', id: dupeId, patch: { theirPark: 'K-9999' } });
+    expect(deps.ctx.state.qsos.get(dupeId)?.dupe).toBe(false);
+  });
+
+  test('editing only RST fields (no dupe-key fields) leaves the dupe flag untouched', async () => {
+    const deps = await makeDeps();
+    const conn = await signIn(deps, 'W1OP');
+    await dispatch(deps, conn, { type: 'reserve', band: '20m', mode: 'SSB', station: 'R01' });
+    await dispatch(deps, conn, { type: 'qso:add', clientId: 'c1', qso: newQso({ call: 'W2ABC' }) });
+    await dispatch(deps, conn, { type: 'qso:add', clientId: 'c2', qso: newQso({ call: 'W2ABC' }), override: true });
+
+    const dupeId = deps.ctx.state.qsoIdByClientId.get('c2')!;
+    await dispatch(deps, conn, { type: 'qso:edit', id: dupeId, patch: { rstRcvd: '55' } });
     expect(deps.ctx.state.qsos.get(dupeId)?.dupe).toBe(true);
-    expect(deps.ctx.state.qsos.get(dupeId)?.exchSection).toBe('WPA');
+    expect(deps.ctx.state.qsos.get(dupeId)?.rstRcvd).toBe('55');
   });
 });
 
-describe('qso:edit / qso:delete ownership (CO-4)', () => {
-  test('operator B cannot edit operator A\'s QSO', async () => {
+describe('qso:edit / qso:delete ownership', () => {
+  test("operator B cannot edit operator A's QSO", async () => {
     const deps = await makeDeps();
     const connA = await signIn(deps, 'W1OP');
-    await dispatch(deps, connA, { type: 'reserve', band: '20m', mode: 'PH', station: 'MAIN' });
+    await dispatch(deps, connA, { type: 'reserve', band: '20m', mode: 'SSB', station: 'R01' });
     await dispatch(deps, connA, { type: 'qso:add', clientId: 'c1', qso: newQso() });
     const id = deps.ctx.state.qsoIdByClientId.get('c1')!;
 
     const connB = await signIn(deps, 'W2OP');
-    await dispatch(deps, connB, { type: 'qso:edit', id, patch: { exchSection: 'WPA' } });
+    await dispatch(deps, connB, { type: 'qso:edit', id, patch: { rstRcvd: '55' } });
     expect((lastRejects(connB)[0] as any).reason).toBe('NOT_YOUR_QSO');
-    expect(deps.ctx.state.qsos.get(id)?.exchSection).toBe('EPA'); // unchanged
+    expect(deps.ctx.state.qsos.get(id)?.rstRcvd).toBe('59'); // unchanged
   });
 
-  test('operator B cannot delete operator A\'s QSO', async () => {
+  test("operator B cannot delete operator A's QSO", async () => {
     const deps = await makeDeps();
     const connA = await signIn(deps, 'W1OP');
-    await dispatch(deps, connA, { type: 'reserve', band: '20m', mode: 'PH', station: 'MAIN' });
+    await dispatch(deps, connA, { type: 'reserve', band: '20m', mode: 'SSB', station: 'R01' });
     await dispatch(deps, connA, { type: 'qso:add', clientId: 'c1', qso: newQso() });
     const id = deps.ctx.state.qsoIdByClientId.get('c1')!;
 
@@ -266,19 +276,19 @@ describe('qso:edit / qso:delete ownership (CO-4)', () => {
   test('the owning operator can edit and delete their own QSO', async () => {
     const deps = await makeDeps();
     const conn = await signIn(deps, 'W1OP');
-    await dispatch(deps, conn, { type: 'reserve', band: '20m', mode: 'PH', station: 'MAIN' });
+    await dispatch(deps, conn, { type: 'reserve', band: '20m', mode: 'SSB', station: 'R01' });
     await dispatch(deps, conn, { type: 'qso:add', clientId: 'c1', qso: newQso() });
     const id = deps.ctx.state.qsoIdByClientId.get('c1')!;
 
-    await dispatch(deps, conn, { type: 'qso:edit', id, patch: { exchSection: 'WPA' } });
-    expect(deps.ctx.state.qsos.get(id)?.exchSection).toBe('WPA');
+    await dispatch(deps, conn, { type: 'qso:edit', id, patch: { rstRcvd: '55' } });
+    expect(deps.ctx.state.qsos.get(id)?.rstRcvd).toBe('55');
 
     await dispatch(deps, conn, { type: 'qso:delete', id });
     expect(deps.ctx.state.qsos.get(id)?.deleted).toBe(true);
   });
 });
 
-describe('config:set / bonus:set admin gating (CO-5)', () => {
+describe('config:set admin gating', () => {
   test('config:set rejects a non-admin connection', async () => {
     const deps = await makeDeps();
     const conn = makeConn();
@@ -293,42 +303,34 @@ describe('config:set / bonus:set admin gating (CO-5)', () => {
     await dispatch(deps, conn, { type: 'config:set', config: { ...deps.ctx.state.config!, clubName: 'New Name' } });
     expect(deps.ctx.state.config?.clubName).toBe('New Name');
   });
-
-  test('bonus:set rejects a non-admin connection', async () => {
-    const deps = await makeDeps();
-    const conn = makeConn();
-    await dispatch(deps, conn, { type: 'bonus:set', bonusId: 'media-publicity', claim: { claimed: true } });
-    expect((lastRejects(conn)[0] as any).reason).toBe('NOT_ADMIN');
-    expect(deps.ctx.state.bonuses.get('media-publicity')).toBeUndefined();
-  });
-
-  test('bonus:set succeeds for an admin connection', async () => {
-    const deps = await makeDeps();
-    const conn = makeAdminConn();
-    await dispatch(deps, conn, { type: 'bonus:set', bonusId: 'media-publicity', claim: { claimed: true } });
-    expect(deps.ctx.state.bonuses.get('media-publicity')?.claimed).toBe(true);
-  });
 });
 
 describe('reserve', () => {
-  test('a second operator cannot claim an already-held band/mode slot', async () => {
+  test('a second operator cannot claim an already-held band/mode slot on the same station', async () => {
     const deps = await makeDeps();
     const connA = await signIn(deps, 'W1OP');
-    await dispatch(deps, connA, { type: 'reserve', band: '20m', mode: 'PH', station: 'MAIN' });
+    await dispatch(deps, connA, { type: 'reserve', band: '20m', mode: 'SSB', station: 'R01' });
 
     const connB = await signIn(deps, 'W1OP2');
-    await dispatch(deps, connB, { type: 'reserve', band: '20m', mode: 'PH', station: 'MAIN' });
+    await dispatch(deps, connB, { type: 'reserve', band: '20m', mode: 'SSB', station: 'R01' });
     expect((lastRejects(connB)[0] as any).reason).toBe('SLOT_TAKEN');
   });
 
-  test('GOTA is a singleton slot -- a conflicting claim on a different band still rejects', async () => {
+  test('the same band/mode can be independently claimed on a different station', async () => {
     const deps = await makeDeps();
     const connA = await signIn(deps, 'W1OP');
-    await dispatch(deps, connA, { type: 'reserve', band: '20m', mode: 'PH', station: 'GOTA' });
+    await dispatch(deps, connA, { type: 'reserve', band: '20m', mode: 'SSB', station: 'R01' });
 
     const connB = await signIn(deps, 'W1OP2');
-    await dispatch(deps, connB, { type: 'reserve', band: '40m', mode: 'CW', station: 'GOTA' });
-    expect((lastRejects(connB)[0] as any).reason).toBe('SLOT_TAKEN');
+    await dispatch(deps, connB, { type: 'reserve', band: '20m', mode: 'SSB', station: 'R02' });
+    expect(lastRejects(connB)).toHaveLength(0);
+  });
+
+  test('rejects reserving an unrecognized station', async () => {
+    const deps = await makeDeps();
+    const conn = await signIn(deps, 'W1OP');
+    await dispatch(deps, conn, { type: 'reserve', band: '20m', mode: 'SSB', station: 'R99' });
+    expect((lastRejects(conn)[0] as any).reason).toBe('INVALID_STATION');
   });
 });
 

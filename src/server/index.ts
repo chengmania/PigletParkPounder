@@ -5,12 +5,13 @@ import { broadcast } from './broadcast.ts';
 import type { CommandDeps, ServerContext } from './commands.ts';
 import { serveJournalBackup, serveQr, serveStatic } from './http.ts';
 import { boot, writeSnapshot, writeSnapshotIfDue } from './journal-io.ts';
+import { serveParksApi } from './parks-http.ts';
 import { generateQrMatrix, qrToAsciiArt, qrToSvg } from './qr.ts';
 import { makeWebSocketHandlers, upgradeIfWebSocket } from './ws.ts';
 
 function parseArgs(argv: string[]): { port: number; dataDir: string; resetAdmin: boolean } {
   let port = 8073;
-  let dataDir = 'fdlog-data';
+  let dataDir = 'potalog-data';
   let resetAdmin = false;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--port' && argv[i + 1]) port = Number(argv[++i]);
@@ -71,12 +72,15 @@ async function main() {
       const adminResponse = await serveAdminApi(req, ctx);
       if (adminResponse) return adminResponse;
 
+      const parksResponse = await serveParksApi(req, ctx);
+      if (parksResponse) return parksResponse;
+
       return serveJournalBackup(req, dataDir) ?? serveQr(req, qrSvg) ?? serveStatic(req);
     },
     websocket: wsHandlers,
   });
 
-  console.log(`PigletDupeDodger listening on port ${port}`);
+  console.log(`PigletParkPounder listening on port ${port}`);
   for (const ip of lanIps) console.log(`  http://${ip}:${port}`);
   console.log(`  http://localhost:${port}`);
   console.log('\nScan to connect:\n');

@@ -6,7 +6,7 @@ out
 dist
 *.tgz
 public/app.js
-fdlog-data/
+potalog-data/
 
 # code coverage
 coverage

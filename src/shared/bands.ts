@@ -1,33 +1,36 @@
 export interface BandDef {
   id: string;
   label: string;
-  // Cabrillo QSO: line frequency field. Satellite has no established numeric
-  // kHz convention for FD Cabrillo submissions, so it uses the literal token.
-  cabrilloFreqKhz: number | 'SAT';
-  // Present only for bands >=50MHz, used to filter the Free VHF station
-  // view (Rule 4.1.2) to VHF/UHF bands only.
-  minMhz?: number;
 }
 
-// No WARC bands (12/17/30m) -- not eligible Field Day bands.
+// Real amateur band set POTA activations run on -- includes the WARC bands
+// (30/17/12m) and 60m that Field Day's Cabrillo-scored band list excluded.
+// No SAT: single-channel-FM satellite rules were a Field Day bonus concern
+// (7.3.7.1), not a POTA one.
 export const BANDS: BandDef[] = [
-  { id: '160m', label: '160m', cabrilloFreqKhz: 1800 },
-  { id: '80m', label: '80m', cabrilloFreqKhz: 3500 },
-  { id: '40m', label: '40m', cabrilloFreqKhz: 7000 },
-  { id: '20m', label: '20m', cabrilloFreqKhz: 14000 },
-  { id: '15m', label: '15m', cabrilloFreqKhz: 21000 },
-  { id: '10m', label: '10m', cabrilloFreqKhz: 28000 },
-  { id: '6m', label: '6m', cabrilloFreqKhz: 50000, minMhz: 50 },
-  { id: '2m', label: '2m', cabrilloFreqKhz: 144000, minMhz: 144 },
-  { id: '70cm', label: '70cm', cabrilloFreqKhz: 432000, minMhz: 432 },
-  { id: 'SAT', label: 'Satellite', cabrilloFreqKhz: 'SAT' },
+  { id: '160m', label: '160m' },
+  { id: '80m', label: '80m' },
+  { id: '60m', label: '60m' },
+  { id: '40m', label: '40m' },
+  { id: '30m', label: '30m' },
+  { id: '20m', label: '20m' },
+  { id: '17m', label: '17m' },
+  { id: '15m', label: '15m' },
+  { id: '12m', label: '12m' },
+  { id: '10m', label: '10m' },
+  { id: '6m', label: '6m' },
+  { id: '2m', label: '2m' },
+  { id: '70cm', label: '70cm' },
 ];
 
 export const BAND_IDS: string[] = BANDS.map((b) => b.id);
 
-// Bands eligible for the Free VHF station (Class A/F only, Rule 4.1.2).
-export const VHF_UP_BAND_IDS: string[] = BANDS.filter((b) => b.minMhz !== undefined).map((b) => b.id);
-
 export function getBand(id: string): BandDef | undefined {
   return BANDS.find((b) => b.id === id);
+}
+
+// ADIF's BAND enum tokens are the uppercase form of our band ids (e.g.
+// "160m" -> "160M", "70cm" -> "70CM").
+export function toAdifBand(id: string): string {
+  return id.toUpperCase();
 }

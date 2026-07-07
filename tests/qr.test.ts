@@ -13,7 +13,7 @@ describe('generateQrMatrix', () => {
   });
 
   test('picks a larger version for longer text', () => {
-    const matrix = generateQrMatrix('http://field-day-host.local:8073/?host=1');
+    const matrix = generateQrMatrix('http://pota-host.local:8073/?host=1');
     expect(matrix.length).toBe(29);
   });
 

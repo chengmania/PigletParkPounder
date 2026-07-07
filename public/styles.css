@@ -1,6 +1,6 @@
 :root {
   /* Warm-dark surfaces (not pure black) -- dark is the default, no media
-     query gate: overnight Field Day operating shouldn't require a choice. */
+     query gate: early-morning and dusk activations shouldn't require a choice. */
   --surface: #1a1a1e;
   --surface-raised: #232328;
   --border: #34343a;
@@ -315,19 +315,12 @@ input[type='checkbox'] {
   color: var(--accent-fg);
 }
 
-.gota-slot {
-  background: var(--surface-raised);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
-  padding: 1rem;
-  margin-bottom: 1.5rem;
+.grid-station-heading {
+  margin-top: 1.5rem;
 }
 
-.gota-controls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  align-items: center;
+.grid-station-heading:first-of-type {
+  margin-top: 0;
 }
 
 /* ---- Log screen ---- */
@@ -354,11 +347,6 @@ input[type='checkbox'] {
   font-weight: 400;
 }
 
-.badge-gota {
-  background: var(--accent);
-  color: var(--accent-fg);
-}
-
 .badge-dupe {
   background: var(--danger);
   color: var(--danger-fg);
@@ -376,90 +364,52 @@ input[type='checkbox'] {
   min-height: var(--touch-min);
 }
 
+/* Each field is now a label+input pair (.log-field), not a bare input --
+   min-width: 0 is the actual fix for the overflow bug: flex items default to
+   min-width: auto (content-based), so without this each field refuses to
+   shrink below its content's natural width once there are enough of them,
+   and the row's intrinsic width spills past .app-content's border. */
 .log-entry-row {
   display: flex;
   flex-wrap: wrap;
   gap: 0.6rem;
-  align-items: flex-start;
+  align-items: flex-end;
 }
 
-.log-entry-row .log-call-input {
-  flex: 1 1 100%;
+.log-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+  flex: 1 1 7rem;
 }
 
-.log-entry-row .section-select {
-  flex: 1 1 auto;
+.log-field label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
 }
 
-@media (min-width: 700px) {
+.log-field input {
+  width: 100%;
+  min-width: 0;
+}
+
+.log-field-call {
+  flex: 2 1 10rem;
+}
+
+.log-entry-row button {
+  flex: 0 0 auto;
+}
+
+@media (min-width: 900px) {
   .log-entry-row {
     flex-wrap: nowrap;
-    align-items: center;
   }
-
-  .log-entry-row .log-call-input {
-    flex: 2 1 auto;
-  }
-
-  .log-entry-row input:not(.log-call-input) {
-    flex: 1 1 auto;
-  }
-
-  .log-entry-row button {
-    flex: 0 0 auto;
-  }
-}
-
-.section-select {
-  position: relative;
-  width: 100%;
-}
-
-.section-select input {
-  width: 100%;
-}
-
-.section-select input.invalid {
-  border-color: var(--danger);
 }
 
 input.invalid {
   border-color: var(--danger);
-}
-
-.section-select-list {
-  position: absolute;
-  z-index: 10;
-  top: 100%;
-  left: 0;
-  right: 0;
-  margin: 2px 0 0;
-  padding: 0.25rem;
-  list-style: none;
-  background: var(--surface-raised);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-md);
-  max-height: 12rem;
-  overflow-y: auto;
-}
-
-.section-select-list li {
-  padding: 0.4rem 0.6rem;
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  font-family: var(--font-mono);
-}
-
-.section-select-list li.highlighted {
-  background: var(--accent);
-  color: var(--accent-fg);
-}
-
-.sat-fields {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
 }
 
 .dupe-status {
@@ -586,7 +536,7 @@ input.invalid {
   text-align: center;
 }
 
-/* ---- Captain club setup / bonus checklist form ---- */
+/* ---- Captain club setup form ---- */
 
 .host-setup-form {
   display: flex;
@@ -604,32 +554,33 @@ input.invalid {
   color: var(--text-muted);
 }
 
-.bonus-checklist {
+.captain-stations-list {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
 }
 
-.bonus-row {
+.captain-station-row {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
   gap: 0.5rem;
+  align-items: center;
   background: var(--surface-raised);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 0.5rem 0.75rem;
 }
 
-.bonus-row input[type='number'] {
-  width: 4.5rem;
-  min-height: auto;
-  padding: 0.25rem;
+.captain-station-row input {
+  flex: 1 1 auto;
+  min-width: 8rem;
 }
 
-.bonus-note {
+.captain-park-resolved {
+  flex: 1 1 100%;
+  font-size: 0.8rem;
   color: var(--text-muted);
-  font-size: 0.85rem;
 }
 
 /* ---- Exports ---- */
@@ -658,15 +609,15 @@ input.invalid {
   padding: 0.6rem 1rem;
 }
 
-/* Secondary reference map on the logging screen -- kept much smaller than
-   the Dashboard/Captain's Station copies, which are the primary place to
-   view it full-size. */
-.log-map-container {
+/* Secondary park-to-park panel on the logging screen -- kept much smaller
+   than the Dashboard/Captain's Station copies, which are the primary place
+   to view it full-size. */
+.log-p2p-container {
   margin: 1.5rem auto;
-  max-width: 420px;
+  max-width: 640px;
 }
 
-.section-map {
+.park-to-park {
   width: 100%;
   background: var(--surface-raised);
   border: 1px solid var(--border);
@@ -675,7 +626,7 @@ input.invalid {
   padding: 0.75rem;
 }
 
-.section-map-toggle {
+.park-to-park-toggle {
   background: transparent;
   border: none;
   color: var(--text);
@@ -687,60 +638,77 @@ input.invalid {
   cursor: pointer;
 }
 
-.section-map-svg-holder {
+.park-to-park-body .qso-table {
+  margin-bottom: 0;
+}
+
+/* ---- Work map ---- */
+
+.work-map {
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+.work-map-svg-holder {
   width: 100%;
 }
 
-.section-map-svg-holder svg {
+.work-map-svg-holder svg {
+  /* Force the rendered box to the viewBox's own aspect ratio (2752.766 /
+     1537.631). The source file's width/height attributes don't match its
+     viewBox ratio, so plain `height: auto` derives a box from those
+     mismatched attributes instead -- the SVG then letterboxes internally
+     via preserveAspectRatio, which silently desyncs every getBoundingClientRect()
+     -based cursor fraction in work-map.ts's pan/zoom math (each zoom/drag
+     anchors to the wrong point, compounding into visibly offset pins). */
   width: 100%;
   height: auto;
+  aspect-ratio: 2752.766 / 1537.631;
   display: block;
 }
 
-.section-path-worked {
-  fill: var(--accent) !important;
-  fill-opacity: 0.35;
+.work-map-svg-holder svg.work-map-interactive {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
 }
 
-.section-pin {
-  fill: var(--text-muted);
-  fill-opacity: 0.5;
-  stroke: var(--surface);
-  stroke-width: 1;
+.work-map-svg-holder svg.work-map-interactive.work-map-dragging {
+  cursor: grabbing;
 }
 
-.section-pin-active {
-  fill: var(--success);
-  fill-opacity: 0.9;
-}
-
-.hi-inset-box {
-  stroke: var(--text-muted);
-  stroke-width: 2;
-  stroke-dasharray: 6 4;
-}
-
-.section-map-badges {
+.work-map-toolbar {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-top: 0.75rem;
+  justify-content: flex-end;
+  margin-bottom: 0.5rem;
 }
 
-.section-map-badge {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  padding: 0.2rem 0.75rem;
+.work-map-toolbar button {
+  min-height: auto;
+  padding: 0.3rem 0.75rem;
   font-size: 0.85rem;
-  font-family: var(--font-mono);
-  color: var(--text-muted);
 }
 
-.section-map-badge-active {
-  background: var(--success);
-  color: var(--success-fg);
-  border-color: transparent;
+.work-map-pin {
+  fill: var(--accent);
+  fill-opacity: 0.75;
+  stroke: var(--surface);
+  stroke-width: 4;
+}
+
+.work-map-state-pin {
+  fill: var(--warn);
+  fill-opacity: 0.6;
+  stroke: var(--surface);
+  stroke-width: 3;
+}
+
+.work-map-empty {
+  color: var(--text-muted);
 }
 
 /* ---- Captain's Station auth screens ---- */
@@ -861,4 +829,9 @@ input.invalid {
 .qso-row-deleted {
   opacity: 0.55;
   text-decoration: line-through;
+}
+
+.stat-good {
+  color: var(--success);
+  font-weight: 700;
 }

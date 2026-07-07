@@ -1,7 +1,7 @@
 import { mkdir, open, rename, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import type { BonusClaim, ClubConfig, Operator, Qso, Reservation } from '../shared/types.ts';
+import type { ClubConfig, Operator, Qso, Reservation } from '../shared/types.ts';
 import { type JournalEvent, type State, applyEvent, createInitialState, reservationKey } from '../shared/journal.ts';
 
 export interface BootResult {
@@ -15,7 +15,6 @@ interface SerializedState {
   reservations: Reservation[];
   qsos: Qso[];
   qsoIdByClientId: [string, string][];
-  bonuses: [string, BonusClaim][];
 }
 
 interface SnapshotFile {
@@ -40,7 +39,6 @@ function serializeState(state: State): SerializedState {
     reservations: [...state.reservations.values()],
     qsos: [...state.qsos.values()],
     qsoIdByClientId: [...state.qsoIdByClientId.entries()],
-    bonuses: [...state.bonuses.entries()],
   };
 }
 
@@ -53,7 +51,6 @@ function deserializeState(serialized: SerializedState): State {
   }
   for (const qso of serialized.qsos) state.qsos.set(qso.id, qso);
   for (const [clientId, qsoId] of serialized.qsoIdByClientId) state.qsoIdByClientId.set(clientId, qsoId);
-  for (const [bonusId, claim] of serialized.bonuses) state.bonuses.set(bonusId, claim);
   return state;
 }
 

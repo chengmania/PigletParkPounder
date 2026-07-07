@@ -1,20 +1,22 @@
 import { BANDS } from '../../shared/bands.ts';
-import { scoreLog } from '../../shared/scoring.ts';
-import type { Mode } from '../../shared/types.ts';
+import { toPersonalAdifLog } from '../../shared/export/adif.ts';
+import { MODES } from '../../shared/modes.ts';
+import { computeStats } from '../../shared/pota-stats.ts';
+import { downloadBlob, exportButton } from '../download.ts';
+import { mountParkToPark, type ParkToParkHandle } from '../park-to-park.ts';
 import { sortNewestFirst, toQsoRow } from '../qso-list-model.ts';
-import { mountSectionMap, type SectionMapHandle } from '../section-map.ts';
 import { store } from '../store.ts';
 import { statTile } from '../ui/stat-tile.ts';
-
-const MODES: Mode[] = ['PH', 'CW', 'DIG'];
+import { mountWorkMap, type WorkMapHandle } from '../work-map.ts';
 
 interface Els {
   totals: HTMLElement;
-  warning: HTMLElement;
+  myExportContainer: HTMLElement;
   matrixBody: HTMLElement;
   opList: HTMLElement;
   feedBody: HTMLElement;
-  sectionMap: SectionMapHandle;
+  parkToPark: ParkToParkHandle;
+  workMap: WorkMapHandle;
 }
 
 let els: Els | null = null;
@@ -46,7 +48,7 @@ function build(container: HTMLElement, hasConfig: boolean): void {
 
   if (!hasConfig) {
     const msg = document.createElement('p');
-    msg.textContent = 'Event not configured yet -- ask your Captain to set up the club config.';
+    msg.textContent = 'Club not configured yet -- ask your Captain to set up the club config.';
     root.appendChild(msg);
     container.appendChild(root);
     return;
@@ -56,9 +58,12 @@ function build(container: HTMLElement, hasConfig: boolean): void {
   totals.className = 'dashboard-totals';
   root.appendChild(totals);
 
-  const warning = document.createElement('p');
-  warning.className = 'dashboard-warning hidden';
-  root.appendChild(warning);
+  // A personal action (not Captain-gated): lets the signed-in operator pull
+  // their own QSOs for their general logbook (QRZ, LoTW). Deliberately not
+  // a second POTA submission -- POTA credit already flows to them
+  // automatically once the club uploads its own log (guide section 6).
+  const myExportContainer = document.createElement('div');
+  root.appendChild(myExportContainer);
 
   const matrixTitle = document.createElement('h2');
   matrixTitle.textContent = 'Band / Mode Matrix';
@@ -71,7 +76,7 @@ function build(container: HTMLElement, hasConfig: boolean): void {
   headRow.appendChild(document.createElement('th'));
   for (const mode of MODES) {
     const th = document.createElement('th');
-    th.textContent = mode;
+    th.textContent = mode.label;
     headRow.appendChild(th);
   }
   const totalTh = document.createElement('th');
@@ -96,22 +101,29 @@ function build(container: HTMLElement, hasConfig: boolean): void {
   feedTable.className = 'qso-table';
   const feedThead = document.createElement('thead');
   feedThead.innerHTML =
-    '<tr><th>Call</th><th>UTC Time/Date</th><th>Band</th><th>Mode</th><th>Class</th><th>Section</th><th>Operator</th></tr>';
+    '<tr><th>Call</th><th>UTC Time/Date</th><th>Band</th><th>Mode</th><th>RST Sent</th><th>RST Rcvd</th><th>Their State</th><th>Their Park</th><th>Operator</th></tr>';
   feedTable.appendChild(feedThead);
   const feedBody = document.createElement('tbody');
   feedTable.appendChild(feedBody);
   root.appendChild(feedTable);
 
+  const p2pTitle = document.createElement('h2');
+  p2pTitle.textContent = 'Park-to-Park';
+  root.appendChild(p2pTitle);
+  const p2pContainer = document.createElement('div');
+  root.appendChild(p2pContainer);
+  const parkToPark = mountParkToPark(p2pContainer, { alwaysExpanded: true });
+
   const mapTitle = document.createElement('h2');
-  mapTitle.textContent = 'Section Map';
+  mapTitle.textContent = 'Work Map';
   root.appendChild(mapTitle);
   const mapContainer = document.createElement('div');
   root.appendChild(mapContainer);
-  const sectionMap = mountSectionMap(mapContainer, { alwaysExpanded: true });
+  const workMap = mountWorkMap(mapContainer);
 
   container.appendChild(root);
 
-  els = { totals, warning, matrixBody, opList, feedBody, sectionMap };
+  els = { totals, myExportContainer, matrixBody, opList, feedBody, parkToPark, workMap };
 }
 
 function updateDynamic(): void {
@@ -121,25 +133,24 @@ function updateDynamic(): void {
   if (!config) return;
 
   const qsos = [...state.data.qsos.values()];
-  const operators = [...state.data.operators.values()];
-  const score = scoreLog(qsos, config, state.data.bonuses, operators);
+  const stats = computeStats(qsos);
 
   els.totals.innerHTML = '';
   els.totals.append(
-    statTile('QSO Points', String(score.qsoPoints)),
-    statTile('Multiplier', `x${score.multiplier}`),
-    statTile('Multiplied Points', String(score.multipliedPoints)),
-    statTile('Bonus Points', String(score.bonusPoints)),
-    statTile('GOTA Bonus', String(score.gotaBonus)),
-    statTile('Youth Bonus', String(score.youthBonus)),
-    statTile('Total', String(score.total)),
+    statTile('Total QSOs', String(stats.totalQsos)),
+    statTile('Unique Callsigns', String(stats.uniqueCallsigns)),
+    statTile('Park-to-Park QSOs', String(stats.parkToParkCount)),
   );
 
-  if (score.ineligibleClaims.length > 0) {
-    els.warning.textContent = `Claimed but not counted (class-ineligible or requirements unmet): ${score.ineligibleClaims.join(', ')}`;
-    els.warning.classList.remove('hidden');
-  } else {
-    els.warning.classList.add('hidden');
+  els.myExportContainer.innerHTML = '';
+  if (state.you) {
+    const you = state.you;
+    els.myExportContainer.appendChild(
+      exportButton('Export My Log (QRZ/LoTW)', () => {
+        const adif = toPersonalAdifLog(qsos, config.clubCall, you.call);
+        downloadBlob(`${you.call}-my-log.adi`, adif, 'text/plain');
+      }),
+    );
   }
 
   els.matrixBody.innerHTML = '';
@@ -150,7 +161,7 @@ function updateDynamic(): void {
     row.appendChild(label);
     let rowTotal = 0;
     for (const mode of MODES) {
-      const count = qsos.filter((q) => !q.deleted && q.band === band.id && q.mode === mode).length;
+      const count = qsos.filter((q) => !q.deleted && !q.dupe && q.band === band.id && q.mode === mode.id).length;
       rowTotal += count;
       const td = document.createElement('td');
       td.textContent = String(count);
@@ -163,14 +174,14 @@ function updateDynamic(): void {
   }
 
   els.opList.innerHTML = '';
-  for (const [call, stats] of Object.entries(score.perOperator).sort((a, b) => b[1].count - a[1].count)) {
+  for (const [call, count] of Object.entries(stats.perOperator).sort((a, b) => b[1] - a[1])) {
     const li = document.createElement('li');
-    li.textContent = `${call}: ${stats.count} QSOs, ${stats.qsoPoints} pts`;
+    li.textContent = `${call}: ${count} QSOs`;
     els.opList.appendChild(li);
   }
 
-  // All-operators live QSO feed (CO-7) -- deleted rows are filtered out
-  // here, unlike the admin firehose which intentionally shows them.
+  // All-operators live QSO feed -- deleted rows are filtered out here,
+  // unlike the admin firehose which intentionally shows them.
   els.feedBody.innerHTML = '';
   const rows = sortNewestFirst(qsos.filter((q) => !q.deleted)).map((q) => toQsoRow(q, null));
   for (const row of rows) {
@@ -184,7 +195,7 @@ function updateDynamic(): void {
       callCell.appendChild(badge);
     }
     tr.appendChild(callCell);
-    for (const value of [row.utc, row.band, row.mode, row.exchClass, row.exchSection, row.operatorCall]) {
+    for (const value of [row.utc, row.band, row.mode, row.rstSent, row.rstRcvd, row.theirState ?? '', row.theirPark ?? '', row.operatorCall]) {
       const td = document.createElement('td');
       td.textContent = value;
       tr.appendChild(td);
@@ -192,5 +203,6 @@ function updateDynamic(): void {
     els.feedBody.appendChild(tr);
   }
 
-  els.sectionMap.update();
+  els.parkToPark.update();
+  els.workMap.update();
 }

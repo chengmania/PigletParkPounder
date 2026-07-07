@@ -1,59 +1,82 @@
 import { BANDS } from '../../shared/bands.ts';
-import { scoreLog } from '../../shared/scoring.ts';
-import type { Mode } from '../../shared/types.ts';
+import { MODES } from '../../shared/modes.ts';
+import { computeStats } from '../../shared/pota-stats.ts';
 import { store } from '../store.ts';
 import { statTile } from '../ui/stat-tile.ts';
+import { mountWorkMap } from '../work-map.ts';
 
-const MODES: Mode[] = ['PH', 'CW', 'DIG'];
-
-export function mountCaptainScore(container: HTMLElement): () => void {
+export function mountCaptainStats(container: HTMLElement): () => void {
   container.innerHTML = '';
   const root = document.createElement('div');
   root.className = 'screen dashboard-screen';
 
   const title = document.createElement('h1');
-  title.textContent = 'Score Summary';
+  title.textContent = 'Stats';
   root.appendChild(title);
 
   const body = document.createElement('div');
   root.appendChild(body);
+
+  // Mounted once (fetches the bundled world-map.svg a single time) and kept
+  // outside `body`'s per-refresh innerHTML reset below -- only its pins get
+  // redrawn on each refresh, via workMap.update().
+  const mapTitle = document.createElement('h2');
+  mapTitle.textContent = 'Work Map';
+  root.appendChild(mapTitle);
+  const mapContainer = document.createElement('div');
+  root.appendChild(mapContainer);
+  const workMap = mountWorkMap(mapContainer);
+
   container.appendChild(root);
 
   function refresh(): void {
+    workMap.update();
     body.innerHTML = '';
     const state = store.get();
     const config = state.data.config;
 
     if (!config) {
       const msg = document.createElement('p');
-      msg.textContent = 'Event not configured yet -- set up the club config first.';
+      msg.textContent = 'Club not configured yet -- set up the club config first.';
       body.appendChild(msg);
       return;
     }
 
     const qsos = [...state.data.qsos.values()];
-    const operators = [...state.data.operators.values()];
-    const score = scoreLog(qsos, config, state.data.bonuses, operators);
+    const stats = computeStats(qsos);
 
     const totals = document.createElement('div');
     totals.className = 'dashboard-totals';
     totals.append(
-      statTile('QSO Points', String(score.qsoPoints)),
-      statTile('Multiplier', `x${score.multiplier}`),
-      statTile('Multiplied Points', String(score.multipliedPoints)),
-      statTile('Bonus Points', String(score.bonusPoints)),
-      statTile('GOTA Bonus', String(score.gotaBonus)),
-      statTile('Youth Bonus', String(score.youthBonus)),
-      statTile('Total', String(score.total)),
+      statTile('Total QSOs', String(stats.totalQsos)),
+      statTile('Unique Callsigns', String(stats.uniqueCallsigns)),
+      statTile('Park-to-Park QSOs', String(stats.parkToParkCount)),
     );
     body.appendChild(totals);
 
-    if (score.ineligibleClaims.length > 0) {
-      const warn = document.createElement('p');
-      warn.className = 'dashboard-warning';
-      warn.textContent = `Claimed but not counted (class-ineligible or requirements unmet): ${score.ineligibleClaims.join(', ')}`;
-      body.appendChild(warn);
+    const parkTitle = document.createElement('h2');
+    parkTitle.textContent = 'Activation Credit by Park / Day';
+    body.appendChild(parkTitle);
+
+    const parkTable = document.createElement('table');
+    parkTable.className = 'dashboard-matrix';
+    parkTable.innerHTML = '<thead><tr><th>Park</th><th>State</th><th>UTC Day</th><th>QSOs</th><th>Unique</th><th>Activated</th></tr></thead>';
+    const parkBody = document.createElement('tbody');
+    for (const p of stats.perPark) {
+      const row = document.createElement('tr');
+      for (const value of [p.park, p.state ?? '', p.dateUtc, String(p.qsoCount), String(p.uniqueCallsigns)]) {
+        const td = document.createElement('td');
+        td.textContent = value;
+        row.appendChild(td);
+      }
+      const activatedTd = document.createElement('td');
+      activatedTd.textContent = p.activated ? 'YES ✓' : `${p.uniqueCallsigns}/10`;
+      activatedTd.className = p.activated ? 'stat-good' : '';
+      row.appendChild(activatedTd);
+      parkBody.appendChild(row);
     }
+    parkTable.appendChild(parkBody);
+    body.appendChild(parkTable);
 
     const matrixTitle = document.createElement('h2');
     matrixTitle.textContent = 'Band / Mode Matrix';
@@ -66,7 +89,7 @@ export function mountCaptainScore(container: HTMLElement): () => void {
     headRow.appendChild(document.createElement('th'));
     for (const mode of MODES) {
       const th = document.createElement('th');
-      th.textContent = mode;
+      th.textContent = mode.label;
       headRow.appendChild(th);
     }
     const totalTh = document.createElement('th');
@@ -83,7 +106,7 @@ export function mountCaptainScore(container: HTMLElement): () => void {
       row.appendChild(label);
       let rowTotal = 0;
       for (const mode of MODES) {
-        const count = qsos.filter((q) => !q.deleted && q.band === band.id && q.mode === mode).length;
+        const count = qsos.filter((q) => !q.deleted && !q.dupe && q.band === band.id && q.mode === mode.id).length;
         rowTotal += count;
         const td = document.createElement('td');
         td.textContent = String(count);
@@ -101,9 +124,9 @@ export function mountCaptainScore(container: HTMLElement): () => void {
     opTitle.textContent = 'Per-Operator';
     body.appendChild(opTitle);
     const opList = document.createElement('ul');
-    for (const [call, stats] of Object.entries(score.perOperator).sort((a, b) => b[1].count - a[1].count)) {
+    for (const [call, count] of Object.entries(stats.perOperator).sort((a, b) => b[1] - a[1])) {
       const li = document.createElement('li');
-      li.textContent = `${call}: ${stats.count} QSOs, ${stats.qsoPoints} pts`;
+      li.textContent = `${call}: ${count} QSOs`;
       opList.appendChild(li);
     }
     body.appendChild(opList);

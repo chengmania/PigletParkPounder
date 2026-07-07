@@ -1,14 +1,15 @@
 import { BANDS } from '../../shared/bands.ts';
-import { checkDupe } from '../../shared/dupe.ts';
+import { checkDupe, utcDateOf } from '../../shared/dupe.ts';
 import { generateId } from '../../shared/id.ts';
+import { defaultRst, MODES } from '../../shared/modes.ts';
 import type { Mode, Qso, Reservation, StationKind } from '../../shared/types.ts';
-import { isValidClass } from '../../shared/validate.ts';
-import { isValidSectionCode } from '../../shared/sections.ts';
+import { isValidParkNumber } from '../../shared/validate.ts';
+import { fillDatalist } from '../autocomplete.ts';
 import { describeDupe } from '../dupe-live.ts';
 import { buildIdentity } from '../log-model.ts';
+import { loadParks, parkOptionLabel, parkReferences } from '../parks.ts';
+import { mountParkToPark, type ParkToParkHandle } from '../park-to-park.ts';
 import { sortNewestFirst, toQsoRow } from '../qso-list-model.ts';
-import { mountSectionMap, type SectionMapHandle } from '../section-map.ts';
-import { mountSectionSelect, type SectionSelectHandle } from '../section-select.ts';
 import { store } from '../store.ts';
 import { onQsoAddOutcome, send } from '../ws-client.ts';
 
@@ -24,16 +25,15 @@ interface Els {
   contextSelect: HTMLSelectElement | null;
   contextLabel: HTMLElement;
   callInput: HTMLInputElement;
-  classInput: HTMLInputElement;
-  sectionSelect: SectionSelectHandle;
-  satFields: HTMLElement;
-  satNameInput: HTMLInputElement;
-  satFmCheckbox: HTMLInputElement;
+  rstSentInput: HTMLInputElement;
+  rstRcvdInput: HTMLInputElement;
+  theirStateInput: HTMLInputElement;
+  theirParkInput: HTMLInputElement;
   dupeStatus: HTMLElement;
   logBtn: HTMLButtonElement;
   yourRecent: HTMLElement;
   sessionCount: HTMLElement;
-  sectionMap: SectionMapHandle;
+  parkToPark: ParkToParkHandle;
 }
 
 let els: Els | null = null;
@@ -47,7 +47,19 @@ function contextKey(r: Pick<Reservation, 'station' | 'band' | 'mode'>): string {
 
 function parseContextKey(key: string): Context {
   const [station, band, mode] = key.split('|');
-  return { station: station as StationKind, band: band!, mode: mode as Mode };
+  return { station: station!, band: band!, mode: mode! };
+}
+
+// Wraps an input with a small visible label above it -- unlike a bare
+// placeholder, the label stays put once the field has a value in it, which
+// matters for fast tab-through entry where several fields fill up at once.
+function labeledField(label: string, input: HTMLInputElement, extraClass?: string): HTMLElement {
+  const wrapper = document.createElement('div');
+  wrapper.className = extraClass ? `log-field ${extraClass}` : 'log-field';
+  const labelEl = document.createElement('label');
+  labelEl.textContent = label;
+  wrapper.append(labelEl, input);
+  return wrapper;
 }
 
 export function render(container: HTMLElement, isNewMount: boolean): void {
@@ -93,15 +105,29 @@ function buildForm(container: HTMLElement): void {
   callInput.autofocus = true;
   callInput.autocomplete = 'off';
   callInput.className = 'log-call-input';
-  entryRow.appendChild(callInput);
+  entryRow.appendChild(labeledField('Call', callInput, 'log-field-call'));
 
-  const classInput = document.createElement('input');
-  classInput.placeholder = 'Class (e.g. 3A)';
-  entryRow.appendChild(classInput);
+  const rstSentInput = document.createElement('input');
+  rstSentInput.className = 'log-rst-input';
+  entryRow.appendChild(labeledField('RST Sent', rstSentInput));
 
-  const sectionContainer = document.createElement('div');
-  entryRow.appendChild(sectionContainer);
-  const sectionSelect = mountSectionSelect(sectionContainer, { onChange: runDupeCheck });
+  const rstRcvdInput = document.createElement('input');
+  rstRcvdInput.className = 'log-rst-input';
+  entryRow.appendChild(labeledField('RST Rcvd', rstRcvdInput));
+
+  const theirStateInput = document.createElement('input');
+  theirStateInput.placeholder = 'optional';
+  theirStateInput.className = 'log-state-input';
+  entryRow.appendChild(labeledField('Their State', theirStateInput));
+
+  const theirParkInput = document.createElement('input');
+  theirParkInput.placeholder = 'P2P, optional';
+  theirParkInput.className = 'log-park-input';
+  const parkDatalist = document.createElement('datalist');
+  parkDatalist.id = 'log-their-park-list';
+  theirParkInput.setAttribute('list', parkDatalist.id);
+  entryRow.appendChild(labeledField('Their Park', theirParkInput));
+  loadParks().then(() => fillDatalist(parkDatalist, parkReferences(), parkOptionLabel));
 
   const logBtn = document.createElement('button');
   logBtn.type = 'submit';
@@ -109,19 +135,7 @@ function buildForm(container: HTMLElement): void {
   entryRow.appendChild(logBtn);
 
   form.appendChild(entryRow);
-
-  const satFields = document.createElement('div');
-  satFields.className = 'sat-fields hidden';
-  const satNameInput = document.createElement('input');
-  satNameInput.placeholder = 'Satellite name';
-  satFields.appendChild(satNameInput);
-  const satFmLabel = document.createElement('label');
-  const satFmCheckbox = document.createElement('input');
-  satFmCheckbox.type = 'checkbox';
-  satFmLabel.appendChild(satFmCheckbox);
-  satFmLabel.append(' Single-channel FM (one QSO limit)');
-  satFields.appendChild(satFmLabel);
-  form.appendChild(satFields);
+  form.appendChild(parkDatalist);
 
   const dupeStatus = document.createElement('div');
   dupeStatus.className = 'dupe-status';
@@ -129,10 +143,10 @@ function buildForm(container: HTMLElement): void {
 
   root.appendChild(form);
 
-  const mapContainer = document.createElement('div');
-  mapContainer.className = 'log-map-container';
-  root.appendChild(mapContainer);
-  const sectionMap = mountSectionMap(mapContainer);
+  const p2pContainer = document.createElement('div');
+  p2pContainer.className = 'log-p2p-container';
+  root.appendChild(p2pContainer);
+  const parkToPark = mountParkToPark(p2pContainer);
 
   const sessionCount = document.createElement('p');
   sessionCount.className = 'session-count';
@@ -145,7 +159,7 @@ function buildForm(container: HTMLElement): void {
   yourRecentTable.className = 'qso-table';
   const yourRecentHead = document.createElement('thead');
   yourRecentHead.innerHTML =
-    '<tr><th>Call</th><th>UTC Time/Date</th><th>Band</th><th>Class</th><th>Section</th><th></th><th></th></tr>';
+    '<tr><th>Call</th><th>UTC Time/Date</th><th>Band</th><th>Mode</th><th>RST Sent</th><th>RST Rcvd</th><th>Their State</th><th>Their Park</th><th></th><th></th></tr>';
   yourRecentTable.appendChild(yourRecentHead);
   const yourRecent = document.createElement('tbody');
   yourRecentTable.appendChild(yourRecent);
@@ -159,30 +173,24 @@ function buildForm(container: HTMLElement): void {
     contextSelect: null,
     contextLabel,
     callInput,
-    classInput,
-    sectionSelect,
-    satFields,
-    satNameInput,
-    satFmCheckbox,
+    rstSentInput,
+    rstRcvdInput,
+    theirStateInput,
+    theirParkInput,
     dupeStatus,
     logBtn,
     yourRecent,
     sessionCount,
-    sectionMap,
+    parkToPark,
   };
 
   lastReservationKeys = '\0force-rebuild'; // sentinel so the first updateDynamic() always (re)builds
 
   callInput.addEventListener('input', runDupeCheck);
-  satNameInput.addEventListener('input', runDupeCheck);
-  satFmCheckbox.addEventListener('change', runDupeCheck);
-
-  // Class validation is a soft warning, not a hard block on submit -- the
-  // server's INVALID_CLASS reject remains final authority (surfaced via the
-  // onQsoAddOutcome listener below). This just gives live visual feedback.
-  classInput.addEventListener('input', () => {
-    const value = classInput.value.trim();
-    classInput.classList.toggle('invalid', value !== '' && !isValidClass(value));
+  theirParkInput.addEventListener('input', () => {
+    const value = theirParkInput.value.trim();
+    theirParkInput.classList.toggle('invalid', value !== '' && !isValidParkNumber(value));
+    runDupeCheck();
   });
 
   form.addEventListener('submit', (e) => {
@@ -192,11 +200,10 @@ function buildForm(container: HTMLElement): void {
   form.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       callInput.value = '';
-      classInput.value = '';
-      classInput.classList.remove('invalid');
-      sectionSelect.setValue('');
-      satNameInput.value = '';
-      satFmCheckbox.checked = false;
+      theirStateInput.value = '';
+      theirParkInput.value = '';
+      theirParkInput.classList.remove('invalid');
+      resetRstDefaults();
       runDupeCheck();
     }
   });
@@ -243,7 +250,7 @@ function buildContextSelector(contextRow: HTMLElement): void {
       select.appendChild(opt);
     }
     select.addEventListener('change', () => {
-      toggleSatFields();
+      resetRstDefaults();
       runDupeCheck();
       updateIdentityBar();
     });
@@ -251,7 +258,7 @@ function buildContextSelector(contextRow: HTMLElement): void {
     els.contextSelect = select;
   }
 
-  toggleSatFields();
+  resetRstDefaults();
 }
 
 function getContext(): Context | null {
@@ -262,10 +269,12 @@ function getContext(): Context | null {
   return { station: r.station, band: r.band, mode: r.mode };
 }
 
-function toggleSatFields(): void {
+function resetRstDefaults(): void {
   if (!els) return;
   const ctx = getContext();
-  els.satFields.classList.toggle('hidden', ctx?.band !== 'SAT');
+  if (!ctx) return;
+  els.rstSentInput.value = defaultRst(ctx.mode);
+  els.rstRcvdInput.value = defaultRst(ctx.mode);
 }
 
 function updateIdentityBar(): void {
@@ -274,17 +283,11 @@ function updateIdentityBar(): void {
   const identity = buildIdentity(state.data.config, getContext());
 
   els.identityBar.innerHTML = '';
-  const parts = [identity.callsign || '—', identity.entryClass || '—', identity.section || '—', identity.bandMode ?? '—'];
+  const parts = [identity.callsign || '—', identity.station || '—', identity.park || '—', identity.bandMode ?? '—'];
   for (const part of parts) {
     const span = document.createElement('span');
     span.textContent = part;
     els.identityBar.appendChild(span);
-  }
-  if (identity.isGota) {
-    const badge = document.createElement('span');
-    badge.className = 'badge badge-gota';
-    badge.textContent = 'GOTA';
-    els.identityBar.appendChild(badge);
   }
 }
 
@@ -301,17 +304,11 @@ function runDupeCheck(): void {
 
   const state = store.get();
   const config = state.data.config;
+  const theirPark = els.theirParkInput.value.trim() || undefined;
   const result = checkDupe(
-    {
-      call,
-      band: ctx.band,
-      mode: ctx.mode,
-      station: ctx.station,
-      satelliteName: els.satNameInput.value.trim() || undefined,
-      satelliteSingleChannelFm: els.satFmCheckbox.checked,
-    },
+    { call, band: ctx.band, mode: ctx.mode, theirPark, dateUtc: utcDateOf(new Date().toISOString()) },
     [...state.data.qsos.values()],
-    { clubCall: config?.clubCall ?? '', gotaCall: config?.gotaCall },
+    { clubCall: config?.clubCall ?? '' },
   );
   const ui = describeDupe(result);
   els.dupeStatus.textContent = ui.label + (ui.workedElsewhereText ? ` -- ${ui.workedElsewhereText}` : '');
@@ -328,19 +325,21 @@ function submitQso(): void {
   if (!ctx || !state.you) return;
 
   const call = els.callInput.value.trim();
-  const exchClass = els.classInput.value.trim().toUpperCase();
-  const exchSection = els.sectionSelect.getValue().trim().toUpperCase();
   if (!call) return;
-  if (!isValidSectionCode(exchSection)) {
-    els.dupeStatus.textContent = 'Invalid section code';
+
+  const theirParkRaw = els.theirParkInput.value.trim();
+  if (theirParkRaw && !isValidParkNumber(theirParkRaw)) {
+    els.dupeStatus.textContent = 'Invalid park number';
     els.dupeStatus.className = 'dupe-status dupe-blocked';
     return;
   }
 
   const override = els.logBtn.dataset.override === '1';
   const clientId = generateId();
-  const satelliteName = ctx.band === 'SAT' ? els.satNameInput.value.trim() || undefined : undefined;
-  const satelliteSingleChannelFm = ctx.band === 'SAT' ? els.satFmCheckbox.checked : undefined;
+  const rstSent = els.rstSentInput.value.trim() || defaultRst(ctx.mode);
+  const rstRcvd = els.rstRcvdInput.value.trim() || defaultRst(ctx.mode);
+  const theirPark = theirParkRaw ? theirParkRaw.toUpperCase() : undefined;
+  const theirState = els.theirStateInput.value.trim().toUpperCase() || undefined;
 
   // If we're offline right now, this QSO will sit in the outbox until
   // reconnect -- flag it queued with our own timestamp so the server uses
@@ -351,18 +350,17 @@ function submitQso(): void {
   send({
     type: 'qso:add',
     clientId,
-    qso: { station: ctx.station, band: ctx.band, mode: ctx.mode, call, exchClass, exchSection, satelliteName, satelliteSingleChannelFm },
+    qso: { station: ctx.station, band: ctx.band, mode: ctx.mode, call, rstSent, rstRcvd, theirPark, theirState },
     override,
     queued: offline,
     clientTs,
   });
 
   els.callInput.value = '';
-  els.classInput.value = '';
-  els.classInput.classList.remove('invalid');
-  els.sectionSelect.setValue('');
-  els.satNameInput.value = '';
-  els.satFmCheckbox.checked = false;
+  els.theirStateInput.value = '';
+  els.theirParkInput.value = '';
+  els.theirParkInput.classList.remove('invalid');
+  resetRstDefaults();
   els.callInput.focus();
   runDupeCheck();
 }
@@ -384,7 +382,7 @@ function updateDynamic(): void {
   els.sessionCount.textContent = `Your QSO count: ${yourCount}`;
 
   renderYourRecent();
-  els.sectionMap.update();
+  els.parkToPark.update();
 }
 
 function renderYourRecent(): void {
@@ -415,7 +413,7 @@ function buildDisplayRow(row: ReturnType<typeof toQsoRow>): HTMLTableRowElement 
   }
   tr.appendChild(callCell);
 
-  for (const value of [row.utc, row.band, row.exchClass, row.exchSection]) {
+  for (const value of [row.utc, row.band, row.mode, row.rstSent, row.rstRcvd, row.theirState ?? '', row.theirPark ?? '']) {
     const td = document.createElement('td');
     td.textContent = value;
     tr.appendChild(td);
@@ -469,17 +467,41 @@ function buildEditRow(q: Qso): HTMLTableRowElement {
   bandTd.appendChild(bandSelect);
   tr.appendChild(bandTd);
 
-  const classInput = document.createElement('input');
-  classInput.value = q.exchClass;
-  const classTd = document.createElement('td');
-  classTd.appendChild(classInput);
-  tr.appendChild(classTd);
+  const modeSelect = document.createElement('select');
+  for (const mode of MODES) {
+    const opt = document.createElement('option');
+    opt.value = mode.id;
+    opt.textContent = mode.label;
+    if (mode.id === q.mode) opt.selected = true;
+    modeSelect.appendChild(opt);
+  }
+  const modeTd = document.createElement('td');
+  modeTd.appendChild(modeSelect);
+  tr.appendChild(modeTd);
 
-  const sectionInput = document.createElement('input');
-  sectionInput.value = q.exchSection;
-  const sectionTd = document.createElement('td');
-  sectionTd.appendChild(sectionInput);
-  tr.appendChild(sectionTd);
+  const rstSentInput = document.createElement('input');
+  rstSentInput.value = q.rstSent;
+  const rstSentTd = document.createElement('td');
+  rstSentTd.appendChild(rstSentInput);
+  tr.appendChild(rstSentTd);
+
+  const rstRcvdInput = document.createElement('input');
+  rstRcvdInput.value = q.rstRcvd;
+  const rstRcvdTd = document.createElement('td');
+  rstRcvdTd.appendChild(rstRcvdInput);
+  tr.appendChild(rstRcvdTd);
+
+  const theirStateInput = document.createElement('input');
+  theirStateInput.value = q.theirState ?? '';
+  const theirStateTd = document.createElement('td');
+  theirStateTd.appendChild(theirStateInput);
+  tr.appendChild(theirStateTd);
+
+  const theirParkInput = document.createElement('input');
+  theirParkInput.value = q.theirPark ?? '';
+  const theirParkTd = document.createElement('td');
+  theirParkTd.appendChild(theirParkInput);
+  tr.appendChild(theirParkTd);
 
   const saveTd = document.createElement('td');
   const saveBtn = document.createElement('button');
@@ -491,8 +513,11 @@ function buildEditRow(q: Qso): HTMLTableRowElement {
       patch: {
         call: callInput.value.trim().toUpperCase(),
         band: bandSelect.value,
-        exchClass: classInput.value.trim().toUpperCase(),
-        exchSection: sectionInput.value.trim().toUpperCase(),
+        mode: modeSelect.value,
+        rstSent: rstSentInput.value.trim(),
+        rstRcvd: rstRcvdInput.value.trim(),
+        theirState: theirStateInput.value.trim().toUpperCase() || undefined,
+        theirPark: theirParkInput.value.trim().toUpperCase() || undefined,
       },
     });
     editingId = null;

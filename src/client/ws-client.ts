@@ -80,7 +80,7 @@ function openSocket(): void {
       // any) so a browser refresh resumes the same session instead of
       // dropping back to the connect screen.
       const saved = loadIdentity();
-      if (saved) rawSend({ type: 'hello', operatorCall: saved.call, name: saved.name, age18OrUnder: saved.age18OrUnder });
+      if (saved) rawSend({ type: 'hello', operatorCall: saved.call, name: saved.name });
     }
     flush(rawSend);
 
@@ -143,8 +143,7 @@ export function signOut(): void {
   if (you) {
     for (const r of state.data.reservations.values()) {
       if (r.operatorCall !== you.call) continue;
-      if (r.station === 'GOTA') send({ type: 'release', station: 'GOTA' });
-      else send({ type: 'release', station: 'MAIN', band: r.band, mode: r.mode });
+      send({ type: 'release', station: r.station, band: r.band, mode: r.mode });
     }
   }
   clearIdentity();

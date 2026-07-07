@@ -33,7 +33,7 @@ export function mountHeader(root: HTMLElement): void {
 
   const title = document.createElement('span');
   title.className = 'app-header-title';
-  title.textContent = 'PigletDupeDodger';
+  title.textContent = 'PigletParkPounder';
   header.appendChild(title);
 
   header.appendChild(createThemeToggle());

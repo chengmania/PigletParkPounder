@@ -24,7 +24,7 @@ function buildForm(container: HTMLElement): void {
   wrapper.className = 'screen connect-screen';
 
   const title = document.createElement('h1');
-  title.textContent = 'PigletDupeDodger';
+  title.textContent = 'PigletParkPounder';
   wrapper.appendChild(title);
 
   const status = document.createElement('p');
@@ -55,13 +55,6 @@ function buildForm(container: HTMLElement): void {
   nameInput.placeholder = 'Name (optional)';
   form.appendChild(nameInput);
 
-  const ageLabel = document.createElement('label');
-  const ageInput = document.createElement('input');
-  ageInput.type = 'checkbox';
-  ageLabel.appendChild(ageInput);
-  ageLabel.append(' 18 or under');
-  form.appendChild(ageLabel);
-
   const submit = document.createElement('button');
   submit.type = 'submit';
   submit.textContent = 'Connect';
@@ -73,10 +66,9 @@ function buildForm(container: HTMLElement): void {
     const identity = {
       call: callInput.value,
       name: nameInput.value.trim() || undefined,
-      age18OrUnder: ageInput.checked || undefined,
     };
     saveIdentity(identity);
-    send({ type: 'hello', operatorCall: identity.call, name: identity.name, age18OrUnder: identity.age18OrUnder });
+    send({ type: 'hello', operatorCall: identity.call, name: identity.name });
   });
 
   wrapper.appendChild(form);

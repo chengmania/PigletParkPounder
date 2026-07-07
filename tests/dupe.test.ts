@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { baseCall, checkDupe, normalizeCall } from '../src/shared/dupe.ts';
+import { baseCall, checkDupe, normalizeCall, utcDateOf } from '../src/shared/dupe.ts';
 import { makeConfig, makeQso } from './fixtures.ts';
 
 describe('normalizeCall', () => {
@@ -19,105 +19,89 @@ describe('baseCall', () => {
   });
 });
 
+describe('utcDateOf', () => {
+  test('extracts the UTC date portion of an ISO timestamp', () => {
+    expect(utcDateOf('2026-06-27T19:00:00.000Z')).toBe('2026-06-27');
+  });
+});
+
 describe('checkDupe', () => {
   const config = makeConfig();
+  const dateUtc = '2026-06-27';
 
   test('new call, empty log', () => {
-    const result = checkDupe({ call: 'W1ABC', band: '20m', mode: 'PH', station: 'MAIN' }, [], config);
+    const result = checkDupe({ call: 'W1ABC', band: '20m', mode: 'SSB', dateUtc }, [], config);
     expect(result.status).toBe('NEW');
     expect(result.workedElsewhere).toEqual([]);
   });
 
   test('exact key already logged is a dupe', () => {
-    const log = [makeQso({ call: 'W1ABC', band: '20m', mode: 'PH', station: 'MAIN' })];
-    const result = checkDupe({ call: 'W1ABC', band: '20m', mode: 'PH', station: 'MAIN' }, log, config);
+    const log = [makeQso({ call: 'W1ABC', band: '20m', mode: 'SSB', ts: '2026-06-27T19:00:00.000Z' })];
+    const result = checkDupe({ call: 'W1ABC', band: '20m', mode: 'SSB', dateUtc }, log, config);
     expect(result.status).toBe('DUPE');
     expect(result.exactDupe).toBeDefined();
   });
 
   test('same call, different band -> NEW with workedElsewhere', () => {
-    const log = [makeQso({ call: 'W1ABC', band: '20m', mode: 'PH', station: 'MAIN' })];
-    const result = checkDupe({ call: 'W1ABC', band: '40m', mode: 'PH', station: 'MAIN' }, log, config);
+    const log = [makeQso({ call: 'W1ABC', band: '20m', mode: 'SSB' })];
+    const result = checkDupe({ call: 'W1ABC', band: '40m', mode: 'SSB', dateUtc }, log, config);
     expect(result.status).toBe('NEW');
     expect(result.workedElsewhere).toHaveLength(1);
     expect(result.workedElsewhere[0]?.band).toBe('20m');
   });
 
   test('same call, different mode -> NEW with workedElsewhere', () => {
-    const log = [makeQso({ call: 'W1ABC', band: '20m', mode: 'PH', station: 'MAIN' })];
-    const result = checkDupe({ call: 'W1ABC', band: '20m', mode: 'CW', station: 'MAIN' }, log, config);
+    const log = [makeQso({ call: 'W1ABC', band: '20m', mode: 'SSB' })];
+    const result = checkDupe({ call: 'W1ABC', band: '20m', mode: 'CW', dateUtc }, log, config);
     expect(result.status).toBe('NEW');
     expect(result.workedElsewhere).toHaveLength(1);
   });
 
-  test('MAIN vs GOTA station isolation -- not a dupe across stations', () => {
-    const log = [makeQso({ call: 'W1ABC', band: '20m', mode: 'PH', station: 'MAIN' })];
-    const result = checkDupe({ call: 'W1ABC', band: '20m', mode: 'PH', station: 'GOTA' }, log, config);
+  test('same call/band/mode/day logged by a different internal station is still a club-wide dupe (guide section 7.1)', () => {
+    const log = [makeQso({ call: 'W1ABC', band: '20m', mode: 'SSB', station: 'R01', ts: '2026-06-27T19:00:00.000Z' })];
+    const result = checkDupe({ call: 'W1ABC', band: '20m', mode: 'SSB', dateUtc }, log, config);
+    expect(result.status).toBe('DUPE');
+  });
+
+  test('different UTC day is NEW -- dupes are scoped per day', () => {
+    const log = [makeQso({ call: 'W1ABC', band: '20m', mode: 'SSB', ts: '2026-06-26T19:00:00.000Z' })];
+    const result = checkDupe({ call: 'W1ABC', band: '20m', mode: 'SSB', dateUtc: '2026-06-27' }, log, config);
     expect(result.status).toBe('NEW');
   });
 
+  test('park-to-park: same hunter from a different park is a unique QSO (SIG_INFO differentiates)', () => {
+    const log = [makeQso({ call: 'W1ABC', band: '20m', mode: 'SSB', theirPark: 'K-1111', ts: '2026-06-27T19:00:00.000Z' })];
+    const result = checkDupe({ call: 'W1ABC', band: '20m', mode: 'SSB', theirPark: 'K-2222', dateUtc }, log, config);
+    expect(result.status).toBe('NEW');
+  });
+
+  test('park-to-park: same hunter, same park, is a dupe', () => {
+    const log = [makeQso({ call: 'W1ABC', band: '20m', mode: 'SSB', theirPark: 'K-1111', ts: '2026-06-27T19:00:00.000Z' })];
+    const result = checkDupe({ call: 'W1ABC', band: '20m', mode: 'SSB', theirPark: 'K-1111', dateUtc }, log, config);
+    expect(result.status).toBe('DUPE');
+  });
+
   test('portable suffix collapses to same base for dupe purposes', () => {
-    const log = [makeQso({ call: 'W1ABC', band: '20m', mode: 'PH', station: 'MAIN' })];
-    const result = checkDupe({ call: 'W1ABC/P', band: '20m', mode: 'PH', station: 'MAIN' }, log, config);
+    const log = [makeQso({ call: 'W1ABC', band: '20m', mode: 'SSB', ts: '2026-06-27T19:00:00.000Z' })];
+    const result = checkDupe({ call: 'W1ABC/P', band: '20m', mode: 'SSB', dateUtc }, log, config);
     expect(result.status).toBe('DUPE');
   });
 
   test('whitespace/case collapse still matches', () => {
-    const log = [makeQso({ call: 'W1ABC', band: '20m', mode: 'PH', station: 'MAIN' })];
-    const result = checkDupe({ call: ' w1abc ', band: '20m', mode: 'PH', station: 'MAIN' }, log, config);
+    const log = [makeQso({ call: 'W1ABC', band: '20m', mode: 'SSB', ts: '2026-06-27T19:00:00.000Z' })];
+    const result = checkDupe({ call: ' w1abc ', band: '20m', mode: 'SSB', dateUtc }, log, config);
     expect(result.status).toBe('DUPE');
   });
 
   test('soft-deleted QSO is ignored for both dupe and workedElsewhere', () => {
-    const log = [makeQso({ call: 'W1ABC', band: '20m', mode: 'PH', station: 'MAIN', deleted: true })];
-    const result = checkDupe({ call: 'W1ABC', band: '20m', mode: 'PH', station: 'MAIN' }, log, config);
+    const log = [makeQso({ call: 'W1ABC', band: '20m', mode: 'SSB', deleted: true })];
+    const result = checkDupe({ call: 'W1ABC', band: '20m', mode: 'SSB', dateUtc }, log, config);
     expect(result.status).toBe('NEW');
     expect(result.workedElsewhere).toEqual([]);
   });
 
-  test('blocks own club call (Rule 6.1), never overridable via status', () => {
-    const result = checkDupe({ call: config.clubCall, band: '20m', mode: 'PH', station: 'MAIN' }, [], config);
+  test('blocks own club call (guide section 7.2), never overridable via status', () => {
+    const result = checkDupe({ call: config.clubCall, band: '20m', mode: 'SSB', dateUtc }, [], config);
     expect(result.status).toBe('BLOCKED_SELF');
-  });
-
-  test('blocks own GOTA call', () => {
-    const result = checkDupe({ call: config.gotaCall!, band: '20m', mode: 'PH', station: 'MAIN' }, [], config);
-    expect(result.status).toBe('BLOCKED_SELF');
-  });
-
-  test('satellite single-channel-FM limit blocks a second QSO on the same satellite by a different call', () => {
-    const log = [
-      makeQso({ call: 'W2XYZ', band: 'SAT', mode: 'PH', station: 'MAIN', satelliteName: 'SO-50', satelliteSingleChannelFm: true }),
-    ];
-    const result = checkDupe(
-      { call: 'W3DEF', band: 'SAT', mode: 'PH', station: 'MAIN', satelliteName: 'SO-50', satelliteSingleChannelFm: true },
-      log,
-      config,
-    );
-    expect(result.status).toBe('BLOCKED_SAT_LIMIT');
-  });
-
-  test('linear-transponder satellite is not subject to the single-channel-FM limit', () => {
-    const log = [
-      makeQso({ call: 'W2XYZ', band: 'SAT', mode: 'PH', station: 'MAIN', satelliteName: 'AO-91', satelliteSingleChannelFm: false }),
-    ];
-    const result = checkDupe(
-      { call: 'W3DEF', band: 'SAT', mode: 'PH', station: 'MAIN', satelliteName: 'AO-91', satelliteSingleChannelFm: false },
-      log,
-      config,
-    );
-    expect(result.status).toBe('NEW');
-  });
-
-  test('repeat call on SAT band via a different satellite is still an ordinary dupe', () => {
-    const log = [
-      makeQso({ call: 'W1ABC', band: 'SAT', mode: 'PH', station: 'MAIN', satelliteName: 'SO-50', satelliteSingleChannelFm: true }),
-    ];
-    const result = checkDupe(
-      { call: 'W1ABC', band: 'SAT', mode: 'PH', station: 'MAIN', satelliteName: 'AO-91', satelliteSingleChannelFm: false },
-      log,
-      config,
-    );
-    expect(result.status).toBe('DUPE');
   });
 });

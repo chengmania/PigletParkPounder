@@ -39,7 +39,7 @@ export async function mountCaptainApp(): Promise<void> {
 // (reusing operator-join plumbing rather than a parallel "admin subscribe"
 // message) -- the captain showing up in the operators list is a harmless
 // side effect. conn.isAdmin (set at upgrade time from the session cookie)
-// independently gates config:set/bonus:set regardless of hello status.
+// independently gates config:set regardless of hello status.
 //
 // Sent directly off the 'connected' transition (not via send()'s normal
 // outbox-on-disconnect fallback) since there's no offline concern here --

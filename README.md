@@ -1,78 +1,91 @@
-# PigletDupeDodger 🐷
+# PigletParkPounder 🐷
 
-Multi-operator, LAN-based, browser-run ARRL Field Day logging program with real-time dupe
-checking. One machine at the site runs the host binary; every operator station connects from
-any browser on the local WiFi network. No internet is ever required, at the site or in the app.
+Multi-operator, LAN-based, browser-run **POTA (Parks on the Air) club activation logger** with
+real-time dupe checking. One machine at the site runs the host binary; every operator station
+connects from any browser on the local WiFi network. No internet is ever required, at the site or
+in the app.
+
+Built around POTA's [Club Activation Guide](docs/GuideForClubs.pdf): everyone transmits the same
+club callsign, duplicates are tracked club-wide (not per radio), and each station/radio can be
+assigned its own park -- so a club running one or more stations across one or more parks gets a
+live, shared dupe sheet instead of merging separate logs after the fact.
 
 73, and may your dupes always be dodged.
 
-**[Download the latest release](https://github.com/chengmania/PigletDupeDodger/releases/latest)** --
+**[Download the latest release](https://github.com/chengmania/PigletParkPounder/releases/latest)** --
 prebuilt binaries for Windows, Mac (Apple Silicon + Intel), and Linux. No install, no
 dependencies, no internet connection needed.
 
-## Screenshots
-
-|                                                                          |                                                                                        |
-| ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
-| **Grid** -- claim a band/mode slot before transmitting on it              | **Log** -- entry row, live dupe check, and a collapsible section map                     |
-| ![Grid](docs/screenshots/grid.png)                                        | ![Log](docs/screenshots/operator-log.png)                                                |
-| **Captain's Station -- Score Summary**                                   | **Captain's Station -- Live QSOs** (the one view that shows deleted entries, struck through) |
-| ![Score Summary](docs/screenshots/captain-score.png)                      | ![Live QSOs](docs/screenshots/captain-live-qsos.png)                                      |
-| **Captain's Station -- Section Map** (full-size, always expanded)        | **Captain's Station -- Club Setup**                                                      |
-| ![Section Map](docs/screenshots/captain-section-map.png)                  | ![Club Setup](docs/screenshots/captain-club-setup.png)                                   |
-
 ## Tent-ready quick start
 
-1. **[Download the latest release](https://github.com/chengmania/PigletDupeDodger/releases/latest)
+1. **[Download the latest release](https://github.com/chengmania/PigletParkPounder/releases/latest)
    and copy the binary onto whatever computer will act as the host** -- a laptop, desktop, or
    something like a Raspberry Pi. It doesn't need internet access -- it just needs to be on the
    same WiFi network the operator stations will use (bring your own travel router if the site has
    no WiFi).
 2. **Run the binary for that computer's operating system:**
-   - Windows: double-click `PigletDupeDodger-win.exe`
-   - Mac (Apple Silicon): `./PigletDupeDodger-mac-arm` from a terminal
-   - Mac (Intel): `./PigletDupeDodger-mac-intel` from a terminal
-   - Linux: `./PigletDupeDodger-linux` from a terminal
+   - Windows: double-click `PigletParkPounder-win.exe`
+   - Mac (Apple Silicon): `./PigletParkPounder-mac-arm` from a terminal
+   - Mac (Intel): `./PigletParkPounder-mac-intel` from a terminal
+   - Linux: `./PigletParkPounder-linux` from a terminal
 
-   On Mac/Linux you may need to allow execution once: `chmod +x PigletDupeDodger-*`.
+   On Mac/Linux you may need to allow execution once: `chmod +x PigletParkPounder-*`.
 3. **A terminal window opens and prints a QR code plus a list of URLs**, e.g.
-   `http://192.168.1.42:8073`. That's the address of your Field Day log for the rest of the
-   event.
+   `http://192.168.1.42:8073`. That's the address of your activation log for the rest of the
+   session.
 4. **On every operator's laptop, tablet, or phone:** join the same WiFi network as the host,
    then open that URL in a browser (or scan the printed QR code, which also appears on the
    app's own connect screen). There's nothing to install on any client.
 5. **Sign in with your callsign** on the connect screen. From there:
-   - **Grid** -- claim a band/mode slot before you start transmitting on it (Rule 6.5: one
-     signal per band/mode at a time). GOTA is a single shared slot, any band/mode (Rule 4.1.1).
-   - **Log** -- the actual logging screen. Type a callsign and you'll see an instant dupe check
-     (green NEW, amber DUPE with a confirm-to-log-anyway, red BLOCKED for your own club/GOTA call
-     or a satellite single-channel-FM limit hit) before you ever touch the network. A collapsible
-     ARRL section map shows live per-section activity as the event progresses.
-   - **Dashboard** -- live score (QSO points, power multiplier, bonuses, GOTA/youth bonus, a
-     band/mode matrix), an all-operators live QSO feed, and the ARRL section map.
+   - **Grid** -- claim a band/mode slot on one of the club's configured stations before you start
+     transmitting on it. Each station gets its own grid and its own park assignment, so multiple
+     radios (the guide's `/R01`, `/R02` convention) never collide on the air or in the log.
+   - **Log** -- the actual logging screen. Type a callsign, RST sent/received, and optionally
+     the hunter's state and (if they're also activating) their park number -- you'll see an
+     instant dupe check (green NEW, amber DUPE with a confirm-to-log-anyway, red BLOCKED for your
+     own club call) before you ever touch the network. Their park number autocompletes from the
+     synced park database (see Captain's Station below) once one exists. Dupes are computed
+     against the whole club's log, across every station and operator -- exactly as POTA scores
+     it. A live Park-to-Park panel shows P2P contacts as they happen.
+   - **Dashboard** -- live stats (total QSOs, unique callsigns, park-to-park count, a band/mode
+     matrix), an all-operators live QSO feed, the Park-to-Park panel, a Work Map (drag to pan,
+     scroll to zoom, all fully offline -- no map tiles, no internet needed) plotting every park
+     referenced in the log plus a rough pin for non-P2P hunters whose "Their State" resolves to a
+     known US state or country, and a personal **Export My Log (QRZ/LoTW)** button -- your own
+     QSOs only, safe to import into your own general logbook since it deliberately omits the
+     POTA-specific fields (that credit already flows to you automatically once the club uploads
+     its own log).
 
-   That's the entire operator nav -- exports, club setup, and the bonus checklist itself are all
-   one level up, in Captain's Station (next).
+   That's the entire operator nav -- exports and club setup are one level up, in Captain's Station
+   (next).
 6. **Captain's Station** (`/captain`, typed into the address bar -- it's deliberately not linked
-   from any operator screen) is where one person configures the event and pulls the exports:
+   from any operator screen) is where one person configures the activation and pulls the exports:
    - **First visit** walks through creating a Captain login (callsign + password) and shows a
      one-time recovery code -- write it down somewhere safe, since it's the only way back in
      if the password is forgotten. Reset later via the in-app "Forgot password?" flow, the
      `--reset-admin` command-line flag (deletes the saved admin login, next `/captain` visit
-     re-runs first-time setup), or simply deleting `fdlog-data/admin.json` while the host is
+     re-runs first-time setup), or simply deleting `potalog-data/admin.json` while the host is
      stopped.
-   - Once logged in: **Club Setup** (club name/call, GOTA call, entry class, section, power
-     multiplier, event window), a read-only **Grid Monitor** and live **QSO firehose** (the one
-     view that shows deleted QSOs, struck through, with band/mode/operator filters), the
-     **Section Map**, the editable **Bonus Checklist**, **Exports** (dupe sheet, Cabrillo, JSON
-     summary, full journal backup), and a **Score Summary**.
+   - Once logged in: **Club Setup** (club name/call and one row per station/radio -- station id,
+     park number(s) -- comma-separated if a station is simultaneously activating more than one
+     overlapping park -- optional park name and state), a read-only **Grid Monitor** and live
+     **QSO firehose** (the one view that shows deleted QSOs, struck through, with band/mode/
+     operator/park-to-park filters), the **Park-to-Park** panel, a **Parks** tab (downloads the
+     current POTA park list from pota.app for autocomplete and the work map -- needs the host to
+     be online at the moment you click Sync Now, not during the activation itself), **Exports**
+     (dupe sheet, ADIF grouped by park and day for POTA submission, JSON summary, full journal
+     backup), and a **Stats** screen with activation-credit progress per park/day plus the same
+     Work Map.
    - This session runs over plain HTTP on the trusted event LAN, same trust model as the rest of
      the app -- it's meant to keep casual operators out of club settings, not to resist a
      determined attacker on the network.
-7. **Everything is saved as you go**, into the `fdlog-data/` folder that sits next to the binary
-   on the host machine. Don't delete or move that folder during the event -- it's the only copy
-   of the log until you run an export. If the host machine crashes or loses power, just relaunch
-   the binary in the same location; it resumes exactly where it left off.
+7. **Everything is saved as you go**, into the `potalog-data/` folder that sits next to the
+   binary on the host machine. Don't delete or move that folder during the activation -- it's the
+   only copy of the log until you run an export. If the host machine crashes or loses power, just
+   relaunch the binary in the same location; it resumes exactly where it left off.
+8. **Submitting to POTA:** the Captain's **Exports** screen produces one ADIF file per
+   park+state+day, already named the way POTA's guide asks for it (`<clubcall>@<park>-<yyyymmdd>.adi`),
+   ready to email or upload from the club's own POTA account -- never an individual operator's.
 
 ## Troubleshooting
 
@@ -86,29 +99,31 @@ dependencies, no internet connection needed.
   typed while offline are queued in the browser and sent automatically once the connection comes
   back, using the time they were actually logged (not the time they finally reached the host).
 - **Wrong band/mode slot / "not your slot" when logging.** Claim the slot on the **Grid** screen
-  first; a slot isn't released automatically when a browser disconnects (a dropped WiFi
-  connection doesn't mean the transmitter went silent), so use the grid's release button if you
-  need to hand it off.
-- **Restarting the host mid-event.** Safe at any time -- relaunch the same binary with the same
-  `fdlog-data/` folder and it replays the journal to rebuild state in under a couple of seconds.
+  first, on the right station; a slot isn't released automatically when a browser disconnects (a
+  dropped WiFi connection doesn't mean the transmitter went silent), so use the grid's release
+  button if you need to hand it off.
+- **Restarting the host mid-activation.** Safe at any time -- relaunch the same binary with the
+  same `potalog-data/` folder and it replays the journal to rebuild state in under a couple of
+  seconds.
 - **Forgot the Captain password.** Use "Forgot password?" on the `/captain` login screen with the
   recovery code written down at setup time. No recovery code on hand? Stop the host, run it
-  once with `--reset-admin` (or delete `fdlog-data/admin.json` by hand), then relaunch normally --
-  the next `/captain` visit re-runs first-time setup and issues a fresh recovery code. This never
-  touches the QSO log itself.
+  once with `--reset-admin` (or delete `potalog-data/admin.json` by hand), then relaunch normally
+  -- the next `/captain` visit re-runs first-time setup and issues a fresh recovery code. This
+  never touches the QSO log itself.
 
 ## Development
 
 ```bash
 bun install
-bun test              # dupe/scoring engines, journal fold, exports, QR encoder, WS commands
+bun test              # dupe/stats engines, journal fold, exports, QR encoder, WS commands
 bun run dev            # start the host server with --watch (http://localhost:8073)
 bun run build:client   # rebuild public/app.js from src/client
 bun run build          # cross-compile all four binaries + assemble dist/bundle/
 ```
 
-The rules source of truth is `docs/2026FieldDayRules.pdf`; the original product/architecture
-spec is `PigletDupeDodger-SPEC.md` in the repo root.
+The rules source of truth is `docs/GuideForClubs.pdf` (POTA's Club Activation Guide) and
+[docs.pota.app](https://docs.pota.app/); the product/architecture spec is
+`PigletParkPounder-SPEC.md` in the repo root.
 
 ### Repo layout
 
@@ -118,13 +133,12 @@ src/server/          host: http+ws server, journal, state machine, QR encoder,
 src/client/          operator SPA: sign-in, band grid, logging, dashboard
 src/client/captain/  Captain's Station SPA: setup/login/recovery + the admin
                      dashboard (club setup, grid monitor, live firehose,
-                     section map, bonus checklist, exports, score)
-src/shared/          types, wire protocol, dupe + scoring engines, exporters,
-                     sections/bonus catalogs, section-map pin data
-public/              index.html, css, section-map.svg
+                     park-to-park panel, parks sync, exports, stats)
+src/shared/          types, wire protocol, dupe + stats engines, exporters
+                     (ADIF/dupe sheet/summary), bands/modes catalogs, park DB types
+public/              index.html, css, world-map.svg (public domain, see file header)
                      (public/app.js is generated by build:client, not committed)
 scripts/build.ts     cross-compile + dist/bundle/ packaging
 tests/
-docs/2026FieldDayRules.pdf
-docs/screenshots/     README gallery images
+docs/GuideForClubs.pdf
 ```

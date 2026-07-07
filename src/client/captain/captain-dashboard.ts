@@ -1,14 +1,14 @@
 import { createThemeToggle } from '../header.ts';
-import { mountCaptainBonus } from './captain-bonus.ts';
 import { mountCaptainClubConfig } from './captain-clubconfig.ts';
 import { mountCaptainExports } from './captain-exports.ts';
 import { mountCaptainFirehose } from './captain-firehose.ts';
 import { mountCaptainGrid } from './captain-grid.ts';
-import { mountCaptainScore } from './captain-score.ts';
-import { mountCaptainSectionMap } from './captain-section-map.ts';
+import { mountCaptainParks } from './captain-parks.ts';
+import { mountCaptainParkToPark } from './captain-park-to-park.ts';
+import { mountCaptainStats } from './captain-stats.ts';
 import { postJson } from './captain-api.ts';
 
-type SectionId = 'score' | 'grid' | 'firehose' | 'map' | 'bonus' | 'clubconfig' | 'exports';
+type SectionId = 'stats' | 'grid' | 'firehose' | 'p2p' | 'clubconfig' | 'parks' | 'exports';
 
 interface Section {
   id: SectionId;
@@ -17,12 +17,12 @@ interface Section {
 }
 
 const SECTIONS: Section[] = [
-  { id: 'score', label: 'Score', mount: mountCaptainScore },
+  { id: 'stats', label: 'Stats', mount: mountCaptainStats },
   { id: 'grid', label: 'Grid Monitor', mount: mountCaptainGrid },
   { id: 'firehose', label: 'Live QSOs', mount: mountCaptainFirehose },
-  { id: 'map', label: 'Section Map', mount: mountCaptainSectionMap },
-  { id: 'bonus', label: 'Bonus Checklist', mount: mountCaptainBonus },
+  { id: 'p2p', label: 'Park-to-Park', mount: mountCaptainParkToPark },
   { id: 'clubconfig', label: 'Club Setup', mount: mountCaptainClubConfig },
+  { id: 'parks', label: 'Parks', mount: mountCaptainParks },
   { id: 'exports', label: 'Exports', mount: mountCaptainExports },
 ];
 

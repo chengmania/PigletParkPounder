@@ -23,8 +23,8 @@ describe('saveIdentity / loadIdentity / clearIdentity', () => {
   });
 
   test('round-trips a saved identity', () => {
-    saveIdentity({ call: 'W1AW', name: 'Hiram', age18OrUnder: true });
-    expect(loadIdentity()).toEqual({ call: 'W1AW', name: 'Hiram', age18OrUnder: true });
+    saveIdentity({ call: 'W1AW', name: 'Hiram' });
+    expect(loadIdentity()).toEqual({ call: 'W1AW', name: 'Hiram' });
   });
 
   test('clearIdentity removes the stored identity', () => {
@@ -34,9 +34,9 @@ describe('saveIdentity / loadIdentity / clearIdentity', () => {
   });
 
   test('falls back to null on garbage or call-less stored values', () => {
-    localStorage.setItem('pdd-identity', 'not json');
+    localStorage.setItem('ppp-identity', 'not json');
     expect(loadIdentity()).toBeNull();
-    localStorage.setItem('pdd-identity', JSON.stringify({ name: 'no call' }));
+    localStorage.setItem('ppp-identity', JSON.stringify({ name: 'no call' }));
     expect(loadIdentity()).toBeNull();
   });
 });

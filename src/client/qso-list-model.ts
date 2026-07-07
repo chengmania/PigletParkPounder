@@ -6,8 +6,11 @@ export interface QsoRow {
   utc: string; // "YYYY-MM-DD HH:MM"
   band: string;
   mode: Mode;
-  exchClass: string;
-  exchSection: string;
+  rstSent: string;
+  rstRcvd: string;
+  myPark: string;
+  theirPark?: string;
+  theirState?: string;
   operatorCall: string;
   station: StationKind;
   isDupe: boolean;
@@ -32,8 +35,11 @@ export function toQsoRow(q: Qso, youCall: string | null): QsoRow {
     utc: formatUtc(q.ts),
     band: q.band,
     mode: q.mode,
-    exchClass: q.exchClass,
-    exchSection: q.exchSection,
+    rstSent: q.rstSent,
+    rstRcvd: q.rstRcvd,
+    myPark: q.myPark,
+    theirPark: q.theirPark,
+    theirState: q.theirState,
     operatorCall: q.operatorCall,
     station: q.station,
     isDupe: !!q.dupe,

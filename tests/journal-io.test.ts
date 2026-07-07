@@ -10,7 +10,7 @@ import type { Qso } from '../src/shared/types.ts';
 const dirsToClean: string[] = [];
 
 async function makeTempDir(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'pdd-journal-io-'));
+  const dir = await mkdtemp(join(tmpdir(), 'ppp-journal-io-'));
   dirsToClean.push(dir);
   return dir;
 }
@@ -26,13 +26,14 @@ function makeQso(id: string): Qso {
   return {
     id,
     ts: '2026-06-27T19:00:00.000Z',
-    station: 'MAIN',
+    station: 'R01',
     band: '20m',
-    mode: 'PH',
+    mode: 'SSB',
     call: 'W1ABC',
-    exchClass: '3A',
-    exchSection: 'EPA',
     operatorCall: 'W1OP',
+    myPark: 'K-1234',
+    rstSent: '59',
+    rstRcvd: '59',
   };
 }
 

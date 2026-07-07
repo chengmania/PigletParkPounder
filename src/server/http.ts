@@ -16,7 +16,7 @@ import stylesCssPath from '../../public/styles.css' with { type: 'file' };
 // `type: 'file'` overrides that to a path string.
 import appJsPath from '../../public/app.js' with { type: 'file' };
 // @ts-expect-error -- same *.css gap as stylesCssPath above.
-import sectionMapSvgPath from '../../public/section-map.svg' with { type: 'file' };
+import worldMapSvgPath from '../../public/world-map.svg' with { type: 'file' };
 
 const STATIC_ROUTES: Record<string, { path: string; contentType: string }> = {
   '/': { path: indexHtmlPath as unknown as string, contentType: 'text/html; charset=utf-8' },
@@ -26,7 +26,7 @@ const STATIC_ROUTES: Record<string, { path: string; contentType: string }> = {
   '/captain': { path: indexHtmlPath as unknown as string, contentType: 'text/html; charset=utf-8' },
   '/styles.css': { path: stylesCssPath as unknown as string, contentType: 'text/css; charset=utf-8' },
   '/app.js': { path: appJsPath as unknown as string, contentType: 'text/javascript; charset=utf-8' },
-  '/section-map.svg': { path: sectionMapSvgPath as unknown as string, contentType: 'image/svg+xml' },
+  '/world-map.svg': { path: worldMapSvgPath as unknown as string, contentType: 'image/svg+xml' },
 };
 
 export function serveJournalBackup(req: Request, dataDir: string): Response | undefined {

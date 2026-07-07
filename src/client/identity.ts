@@ -1,9 +1,8 @@
-const STORAGE_KEY = 'pdd-identity';
+const STORAGE_KEY = 'ppp-identity';
 
 export interface SavedIdentity {
   call: string;
   name?: string;
-  age18OrUnder?: boolean;
 }
 
 // Persists the signed-in operator across a full page reload -- without

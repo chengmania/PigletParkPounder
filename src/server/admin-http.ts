@@ -14,7 +14,7 @@ function withCookie(init: ResponseInit, cookie: string): ResponseInit {
 
 // All routes here are anonymous-reachable by design (setup/login/recovery
 // can't require being logged in already) -- authorization for the actions
-// they enable (config:set/bonus:set) happens over the WS connection via
+// they enable (config:set) happens over the WS connection via
 // conn.isAdmin, gated by the session cookie these routes issue.
 export async function serveAdminApi(req: Request, ctx: ServerContext): Promise<Response | undefined> {
   const url = new URL(req.url);

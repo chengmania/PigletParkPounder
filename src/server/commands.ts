@@ -1,16 +1,13 @@
 import { BAND_IDS } from '../shared/bands.ts';
-import { checkDupe, normalizeCall } from '../shared/dupe.ts';
+import { checkDupe, normalizeCall, utcDateOf } from '../shared/dupe.ts';
 import { generateId } from '../shared/id.ts';
 import { applyEvent, reservationKey, type JournalEvent, type State } from '../shared/journal.ts';
+import { MODE_IDS } from '../shared/modes.ts';
 import type { ClientMessage, FullState, RejectReason, ServerMessage } from '../shared/protocol.ts';
-import { isValidSectionCode } from '../shared/sections.ts';
-import type { Mode, Qso, StationKind } from '../shared/types.ts';
-import { isValidClass } from '../shared/validate.ts';
+import type { Mode, Qso } from '../shared/types.ts';
+import { isValidParkNumber } from '../shared/validate.ts';
 import type { AdminRecord } from './admin-store.ts';
 import { appendEvent } from './journal-io.ts';
-
-const VALID_MODES: Mode[] = ['PH', 'CW', 'DIG'];
-const VALID_STATIONS: StationKind[] = ['MAIN', 'GOTA'];
 
 export interface ServerContext {
   dataDir: string;
@@ -42,7 +39,6 @@ export function buildFullState(ctx: ServerContext): FullState {
     operators: [...ctx.state.operators.values()],
     reservations: [...ctx.state.reservations.values()],
     qsos: [...ctx.state.qsos.values()],
-    bonuses: Object.fromEntries(ctx.state.bonuses),
     seq: ctx.seq,
   };
 }
@@ -52,6 +48,10 @@ async function append(deps: CommandDeps, event: Parameters<typeof applyEvent>[1]
   deps.ctx.state = applyEvent(deps.ctx.state, event);
   deps.ctx.seq += 1;
   deps.broadcast({ type: 'event', event, seq: deps.ctx.seq });
+}
+
+function isValidStation(deps: CommandDeps, station: string): boolean {
+  return (deps.ctx.state.config?.stations ?? []).includes(station);
 }
 
 export async function handleHello(
@@ -66,7 +66,6 @@ export async function handleHello(
     ts: new Date().toISOString(),
     call,
     name: msg.name,
-    age18OrUnder: msg.age18OrUnder,
   });
   conn.send({
     type: 'welcome',
@@ -82,9 +81,10 @@ export async function handleReserve(
   msg: Extract<ClientMessage, { type: 'reserve' }>,
 ): Promise<void> {
   if (!conn.operatorCall) return reject(conn, 'NOT_SIGNED_IN');
-  if (!BAND_IDS.includes(msg.band) || !VALID_MODES.includes(msg.mode) || !VALID_STATIONS.includes(msg.station)) {
+  if (!BAND_IDS.includes(msg.band) || !MODE_IDS.includes(msg.mode)) {
     return reject(conn, 'INVALID_BAND_MODE');
   }
+  if (!isValidStation(deps, msg.station)) return reject(conn, 'INVALID_STATION');
 
   const key = reservationKey(msg.station, msg.band, msg.mode);
   const existing = deps.ctx.state.reservations.get(key);
@@ -113,11 +113,9 @@ export async function handleRelease(
   msg: Extract<ClientMessage, { type: 'release' }>,
 ): Promise<void> {
   if (!conn.operatorCall) return reject(conn, 'NOT_SIGNED_IN');
-  if (msg.station === 'MAIN' && (!msg.band || !msg.mode)) return reject(conn, 'INVALID_BAND_MODE');
+  if (!msg.band || !msg.mode) return reject(conn, 'INVALID_BAND_MODE');
 
-  const band = msg.station === 'GOTA' ? '' : msg.band!;
-  const mode = msg.station === 'GOTA' ? ('PH' as Mode) : msg.mode!;
-  const key = reservationKey(msg.station, band, mode);
+  const key = reservationKey(msg.station, msg.band, msg.mode);
   const existing = deps.ctx.state.reservations.get(key);
   if (!existing) return reject(conn, 'NOT_FOUND');
   if (existing.operatorCall !== conn.operatorCall) return reject(conn, 'NOT_YOUR_SLOT');
@@ -154,34 +152,27 @@ export async function handleQsoAdd(
   if (!conn.operatorCall) return reject(conn, 'NOT_SIGNED_IN', msg.clientId, msg.type);
 
   const { band, mode, station } = msg.qso;
-  if (!BAND_IDS.includes(band) || !VALID_MODES.includes(mode) || !VALID_STATIONS.includes(station)) {
+  if (!BAND_IDS.includes(band) || !MODE_IDS.includes(mode as Mode)) {
     return reject(conn, 'INVALID_BAND_MODE', msg.clientId, msg.type);
   }
-  if (band === 'SAT' && !msg.qso.satelliteName) {
-    return reject(conn, 'SAT_NAME_REQUIRED', msg.clientId, msg.type);
-  }
-  if (!isValidClass(msg.qso.exchClass)) {
-    return reject(conn, 'INVALID_CLASS', msg.clientId, msg.type);
-  }
-  if (!isValidSectionCode(msg.qso.exchSection)) {
-    return reject(conn, 'INVALID_SECTION', msg.clientId, msg.type);
+  if (!isValidStation(deps, station)) return reject(conn, 'INVALID_STATION', msg.clientId, msg.type);
+  if (msg.qso.theirPark && !isValidParkNumber(msg.qso.theirPark)) {
+    return reject(conn, 'INVALID_PARK', msg.clientId, msg.type);
   }
 
-  const config = deps.ctx.state.config ?? { clubCall: '', gotaCall: undefined };
+  const config = deps.ctx.state.config;
+  const parkAssignment = config?.stationParks[station];
+  if (!parkAssignment) return reject(conn, 'INVALID_STATION', msg.clientId, msg.type);
+
+  const ts = msg.queued && msg.clientTs ? msg.clientTs : new Date().toISOString();
+  const theirPark = msg.qso.theirPark ? msg.qso.theirPark.trim().toUpperCase() : undefined;
+
   const dupe = checkDupe(
-    {
-      call: msg.qso.call,
-      band,
-      mode,
-      station,
-      satelliteName: msg.qso.satelliteName,
-      satelliteSingleChannelFm: msg.qso.satelliteSingleChannelFm,
-    },
+    { call: msg.qso.call, band, mode, theirPark, dateUtc: utcDateOf(ts) },
     [...deps.ctx.state.qsos.values()],
-    config,
+    { clubCall: config?.clubCall ?? '' },
   );
   if (dupe.status === 'BLOCKED_SELF') return reject(conn, 'BLOCKED_SELF', msg.clientId, msg.type);
-  if (dupe.status === 'BLOCKED_SAT_LIMIT') return reject(conn, 'SAT_LIMIT', msg.clientId, msg.type);
   if (dupe.status === 'DUPE' && !msg.override) return reject(conn, 'DUPE_CONFIRM_REQUIRED', msg.clientId, msg.type);
 
   const slotKey = reservationKey(station, band, mode);
@@ -190,12 +181,14 @@ export async function handleQsoAdd(
     return reject(conn, 'NOT_YOUR_SLOT', msg.clientId, msg.type);
   }
 
-  const ts = msg.queued && msg.clientTs ? msg.clientTs : new Date().toISOString();
   const qso: Qso = {
     ...msg.qso,
+    theirPark,
     id: generateId(),
     ts,
     operatorCall: conn.operatorCall,
+    myPark: parkAssignment.parkNumber,
+    myState: parkAssignment.state,
     queued: !!msg.queued,
     // Only reachable here with dupe.status === 'DUPE' when override was
     // true (any other DUPE case already rejected above). Hybrid two-press
@@ -204,15 +197,6 @@ export async function handleQsoAdd(
   };
 
   await append(deps, { type: 'qso:add', ts, qso, clientId: msg.clientId });
-
-  if (band === 'SAT' && !deps.ctx.state.bonuses.get('satellite')?.claimed) {
-    await append(deps, {
-      type: 'bonus:set',
-      ts: new Date().toISOString(),
-      bonusId: 'satellite',
-      claim: { claimed: true },
-    });
-  }
 }
 
 export async function handleQsoEdit(
@@ -225,30 +209,29 @@ export async function handleQsoEdit(
   if (!existing) return reject(conn, 'NOT_FOUND');
   if (existing.operatorCall !== conn.operatorCall) return reject(conn, 'NOT_YOUR_QSO');
 
+  if (msg.patch.theirPark !== undefined && msg.patch.theirPark && !isValidParkNumber(msg.patch.theirPark)) {
+    return reject(conn, 'INVALID_PARK');
+  }
+
   // If the edit touches any dupe-key field, re-run checkDupe against the
   // rest of the log (excluding this QSO) with the merged new values and
   // fold the recomputed flag into the same journal event. This handles both
   // directions -- un-duping (call corrected to something fresh) and newly
   // duping (edited into collision with another QSO) -- from one code path.
-  // scoreLog() is always computed fresh from current state, so there's no
+  // computeStats() is always derived fresh from current state, so there's no
   // separate "rescore" step once the flag updates.
   let patch: Extract<JournalEvent, { type: 'qso:edit' }>['patch'] = msg.patch;
-  const touchesDupeKey = !existing.deleted && (msg.patch.call !== undefined || msg.patch.band !== undefined || msg.patch.mode !== undefined);
+  const touchesDupeKey =
+    !existing.deleted &&
+    (msg.patch.call !== undefined || msg.patch.band !== undefined || msg.patch.mode !== undefined || msg.patch.theirPark !== undefined);
   if (touchesDupeKey) {
     const merged = { ...existing, ...msg.patch };
-    const config = deps.ctx.state.config ?? { clubCall: '', gotaCall: undefined };
+    const config = deps.ctx.state.config;
     const others = [...deps.ctx.state.qsos.values()].filter((q) => q.id !== msg.id);
     const result = checkDupe(
-      {
-        call: merged.call,
-        band: merged.band,
-        mode: merged.mode,
-        station: merged.station,
-        satelliteName: merged.satelliteName,
-        satelliteSingleChannelFm: merged.satelliteSingleChannelFm,
-      },
+      { call: merged.call, band: merged.band, mode: merged.mode, theirPark: merged.theirPark, dateUtc: utcDateOf(existing.ts) },
       others,
-      config,
+      { clubCall: config?.clubCall ?? '' },
     );
     patch = { ...msg.patch, dupe: result.status === 'DUPE' };
   }
@@ -266,15 +249,6 @@ export async function handleQsoDelete(
   if (!existing) return reject(conn, 'NOT_FOUND');
   if (existing.operatorCall !== conn.operatorCall) return reject(conn, 'NOT_YOUR_QSO');
   await append(deps, { type: 'qso:delete', ts: new Date().toISOString(), id: msg.id });
-}
-
-export async function handleBonusSet(
-  deps: CommandDeps,
-  conn: Connection,
-  msg: Extract<ClientMessage, { type: 'bonus:set' }>,
-): Promise<void> {
-  if (!conn.isAdmin) return reject(conn, 'NOT_ADMIN');
-  await append(deps, { type: 'bonus:set', ts: new Date().toISOString(), bonusId: msg.bonusId, claim: msg.claim });
 }
 
 export async function handleConfigSet(
@@ -304,8 +278,6 @@ export async function dispatch(deps: CommandDeps, conn: Connection, msg: ClientM
       return handleQsoEdit(deps, conn, msg);
     case 'qso:delete':
       return handleQsoDelete(deps, conn, msg);
-    case 'bonus:set':
-      return handleBonusSet(deps, conn, msg);
     case 'config:set':
       return handleConfigSet(deps, conn, msg);
     case 'ping':
