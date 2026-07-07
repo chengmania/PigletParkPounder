@@ -3,7 +3,7 @@ import { checkDupe, utcDateOf } from '../../shared/dupe.ts';
 import { generateId } from '../../shared/id.ts';
 import { defaultRst, MODES } from '../../shared/modes.ts';
 import type { Mode, Qso, Reservation, StationKind } from '../../shared/types.ts';
-import { isValidParkNumber } from '../../shared/validate.ts';
+import { isValidParkList, splitParkList } from '../../shared/validate.ts';
 import { fillDatalist } from '../autocomplete.ts';
 import { describeDupe } from '../dupe-live.ts';
 import { buildIdentity } from '../log-model.ts';
@@ -121,7 +121,7 @@ function buildForm(container: HTMLElement): void {
   entryRow.appendChild(labeledField('Their State', theirStateInput));
 
   const theirParkInput = document.createElement('input');
-  theirParkInput.placeholder = 'P2P, optional';
+  theirParkInput.placeholder = 'P2P, optional (comma-separated if multi-park)';
   theirParkInput.className = 'log-park-input';
   const parkDatalist = document.createElement('datalist');
   parkDatalist.id = 'log-their-park-list';
@@ -189,7 +189,7 @@ function buildForm(container: HTMLElement): void {
   callInput.addEventListener('input', runDupeCheck);
   theirParkInput.addEventListener('input', () => {
     const value = theirParkInput.value.trim();
-    theirParkInput.classList.toggle('invalid', value !== '' && !isValidParkNumber(value));
+    theirParkInput.classList.toggle('invalid', value !== '' && !isValidParkList(value));
     runDupeCheck();
   });
 
@@ -304,14 +304,24 @@ function runDupeCheck(): void {
 
   const state = store.get();
   const config = state.data.config;
-  const theirPark = els.theirParkInput.value.trim() || undefined;
-  const result = checkDupe(
-    { call, band: ctx.band, mode: ctx.mode, theirPark, dateUtc: utcDateOf(new Date().toISOString()) },
-    [...state.data.qsos.values()],
-    { clubCall: config?.clubCall ?? '' },
+  const theirParkRaw = els.theirParkInput.value.trim();
+  const parks = splitParkList(theirParkRaw);
+  const dateUtc = utcDateOf(new Date().toISOString());
+  const qsos = [...state.data.qsos.values()];
+  const clubCall = config?.clubCall ?? '';
+
+  // A multi-park hunter is one radio contact, logged as one QSO per park
+  // (matches the club-wide dupe key, which is scoped per park) -- preview
+  // the worst status across all of them so a BLOCKED/DUPE on any single
+  // park still stops the whole submission before it happens.
+  const results = (parks.length > 0 ? parks : [undefined]).map((theirPark) =>
+    checkDupe({ call, band: ctx.band, mode: ctx.mode, theirPark, dateUtc }, qsos, { clubCall }),
   );
-  const ui = describeDupe(result);
-  els.dupeStatus.textContent = ui.label + (ui.workedElsewhereText ? ` -- ${ui.workedElsewhereText}` : '');
+  const worst =
+    results.find((r) => r.status === 'BLOCKED_SELF') ?? results.find((r) => r.status === 'DUPE') ?? results[0]!;
+  const ui = describeDupe(worst);
+  const suffix = parks.length > 1 ? ` (${parks.length} parks)` : '';
+  els.dupeStatus.textContent = ui.label + suffix + (ui.workedElsewhereText ? ` -- ${ui.workedElsewhereText}` : '');
   els.dupeStatus.className = `dupe-status ${ui.className}`;
   els.logBtn.disabled = ui.blockedHard;
   els.logBtn.textContent = ui.requiresOverride ? 'Confirm & Log (DUPE)' : 'Log';
@@ -328,18 +338,17 @@ function submitQso(): void {
   if (!call) return;
 
   const theirParkRaw = els.theirParkInput.value.trim();
-  if (theirParkRaw && !isValidParkNumber(theirParkRaw)) {
+  if (theirParkRaw && !isValidParkList(theirParkRaw)) {
     els.dupeStatus.textContent = 'Invalid park number';
     els.dupeStatus.className = 'dupe-status dupe-blocked';
     return;
   }
 
   const override = els.logBtn.dataset.override === '1';
-  const clientId = generateId();
   const rstSent = els.rstSentInput.value.trim() || defaultRst(ctx.mode);
   const rstRcvd = els.rstRcvdInput.value.trim() || defaultRst(ctx.mode);
-  const theirPark = theirParkRaw ? theirParkRaw.toUpperCase() : undefined;
   const theirState = els.theirStateInput.value.trim().toUpperCase() || undefined;
+  const parks = splitParkList(theirParkRaw);
 
   // If we're offline right now, this QSO will sit in the outbox until
   // reconnect -- flag it queued with our own timestamp so the server uses
@@ -347,14 +356,20 @@ function submitQso(): void {
   const offline = state.connection !== 'connected';
   const clientTs = new Date().toISOString();
 
-  send({
-    type: 'qso:add',
-    clientId,
-    qso: { station: ctx.station, band: ctx.band, mode: ctx.mode, call, rstSent, rstRcvd, theirPark, theirState },
-    override,
-    queued: offline,
-    clientTs,
-  });
+  // A hunter simultaneously activating more than one overlapping park is
+  // still one radio contact, but each park earns its own park-to-park
+  // credit -- log one QSO per park (matches the club-wide dupe key, which
+  // is scoped per park) rather than jamming them into a single record.
+  for (const theirPark of parks.length > 0 ? parks : [undefined]) {
+    send({
+      type: 'qso:add',
+      clientId: generateId(),
+      qso: { station: ctx.station, band: ctx.band, mode: ctx.mode, call, rstSent, rstRcvd, theirPark, theirState },
+      override,
+      queued: offline,
+      clientTs,
+    });
+  }
 
   els.callInput.value = '';
   els.theirStateInput.value = '';
