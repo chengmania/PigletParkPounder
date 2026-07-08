@@ -577,10 +577,37 @@ input.invalid {
   min-width: 8rem;
 }
 
-.captain-park-resolved {
-  flex: 1 1 100%;
+/* Resolved-park bubble (src/client/park-bubble.ts): a small floating chip
+   showing the name/state a typed park reference resolves to. Positioned
+   absolutely where its containing field opts in (.log-field-park); inside
+   the Captain's flex-wrap station row it just flows as a plain block. */
+.park-resolved-bubble {
+  display: inline-block;
   font-size: 0.8rem;
-  color: var(--text-muted);
+  color: var(--text);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  padding: 0.2rem 0.55rem;
+}
+
+.park-resolved-bubble.hidden {
+  display: none;
+}
+
+.log-field-park {
+  position: relative;
+}
+
+.log-field-park .park-resolved-bubble {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 0.3rem;
+  z-index: 5;
+  white-space: nowrap;
+  max-width: none;
 }
 
 /* ---- Exports ---- */

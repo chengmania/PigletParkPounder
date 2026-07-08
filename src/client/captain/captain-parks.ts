@@ -62,7 +62,10 @@ export function mountCaptainParks(container: HTMLElement): void {
     syncBtn.textContent = 'Sync Now';
 
     if (!result.ok || !result.body) {
-      error.textContent = 'Sync failed -- check that this machine has an internet connection right now.';
+      error.textContent =
+        result.status === 401
+          ? 'Not authorized -- your Captain session expired, please log in again.'
+          : 'Sync failed -- check that this machine has an internet connection right now.';
       error.classList.remove('hidden');
       return;
     }

@@ -7,6 +7,7 @@ import { isValidParkList, splitParkList } from '../../shared/validate.ts';
 import { fillDatalist } from '../autocomplete.ts';
 import { describeDupe } from '../dupe-live.ts';
 import { buildIdentity } from '../log-model.ts';
+import { mountParkResolvedBubble } from '../park-bubble.ts';
 import { loadParks, parkOptionLabel, parkReferences } from '../parks.ts';
 import { mountParkToPark, type ParkToParkHandle } from '../park-to-park.ts';
 import { sortNewestFirst, toQsoRow } from '../qso-list-model.ts';
@@ -126,7 +127,9 @@ function buildForm(container: HTMLElement): void {
   const parkDatalist = document.createElement('datalist');
   parkDatalist.id = 'log-their-park-list';
   theirParkInput.setAttribute('list', parkDatalist.id);
-  entryRow.appendChild(labeledField('Their Park', theirParkInput));
+  const theirParkField = labeledField('Their Park', theirParkInput, 'log-field-park');
+  theirParkField.appendChild(mountParkResolvedBubble(theirParkInput));
+  entryRow.appendChild(theirParkField);
   loadParks().then(() => fillDatalist(parkDatalist, parkReferences(), parkOptionLabel));
 
   const logBtn = document.createElement('button');

@@ -1,6 +1,6 @@
 import type { ClubConfig, StationParkAssignment } from '../../shared/types.ts';
 import { isValidParkList, splitParkList } from '../../shared/validate.ts';
-import { loadParks, lookupPark } from '../parks.ts';
+import { mountParkResolvedBubble } from '../park-bubble.ts';
 import { store } from '../store.ts';
 import { send } from '../ws-client.ts';
 
@@ -67,28 +67,10 @@ export function mountCaptainClubConfig(container: HTMLElement): () => void {
     parkInput.value = assignment?.parkNumber ?? '';
     wrapper.appendChild(parkInput);
 
-    // Confirms the entered park number(s) are recognized (once the park
-    // database has been synced -- see the Parks tab), catching typos before
-    // save rather than only at export time.
-    const parkResolved = document.createElement('span');
-    parkResolved.className = 'captain-park-resolved';
-    wrapper.appendChild(parkResolved);
-
-    const updateResolved = () => {
-      const segments = splitParkList(parkInput.value);
-      if (segments.length === 0) {
-        parkResolved.textContent = '';
-        return;
-      }
-      parkResolved.textContent = segments
-        .map((ref) => {
-          const record = lookupPark(ref);
-          return record ? `${ref}: ${record.name}${record.state ? `, ${record.state}` : ''}` : `${ref}: unknown park`;
-        })
-        .join(' · ');
-    };
-    parkInput.addEventListener('input', updateResolved);
-    loadParks().then(updateResolved);
+    // Resolves the entered park number(s) to their name/state (once the
+    // park database has been synced -- see the Parks tab), catching typos
+    // before save rather than only at export time.
+    wrapper.appendChild(mountParkResolvedBubble(parkInput));
 
     const parkNameInput = document.createElement('input');
     parkNameInput.placeholder = 'Park Name (optional)';

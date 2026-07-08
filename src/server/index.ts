@@ -69,11 +69,14 @@ async function main() {
       const wsResponse = upgradeIfWebSocket(req, srv, ctx.admin?.sessionSecret ?? fallbackSessionSecret);
       if (wsResponse) return wsResponse;
 
-      const adminResponse = await serveAdminApi(req, ctx);
-      if (adminResponse) return adminResponse;
-
+      // Checked before serveAdminApi: that handler's catch-all 404s any
+      // unmatched /api/admin/* path, which would otherwise swallow
+      // /api/admin/parks/sync before it ever reaches parks-http.ts.
       const parksResponse = await serveParksApi(req, ctx);
       if (parksResponse) return parksResponse;
+
+      const adminResponse = await serveAdminApi(req, ctx);
+      if (adminResponse) return adminResponse;
 
       return serveJournalBackup(req, dataDir) ?? serveQr(req, qrSvg) ?? serveStatic(req);
     },
