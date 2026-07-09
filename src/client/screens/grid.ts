@@ -1,6 +1,5 @@
-import { BANDS } from '../../shared/bands.ts';
+import { BAND_TIERS, type BandTier } from '../../shared/bands.ts';
 import { reservationKey } from '../../shared/journal.ts';
-import { MODES } from '../../shared/modes.ts';
 import type { Reservation, StationParkAssignment } from '../../shared/types.ts';
 import { splitParkList } from '../../shared/validate.ts';
 import { store } from '../store.ts';
@@ -15,9 +14,13 @@ export interface ReservationTableOpts {
 // Shared between the operator grid screen (readOnly:false, wired to
 // reserve/release) and the Captain's Station read-only grid monitor
 // (readOnly:true, no handlers) -- one table-building implementation per
-// station so the two views can't silently drift.
+// station+tier so the two views can't silently drift. One table per band
+// tier (see BAND_TIERS) rather than one flat band x mode-group matrix: a
+// tier only has columns for the mode groups that tier's bands actually use
+// (e.g. no FM column on HF), instead of a mostly-dead 13x8 grid.
 export function buildReservationTable(
   station: string,
+  tier: BandTier,
   reservations: ReadonlyMap<string, Reservation>,
   you: string | null,
   opts: ReservationTableOpts,
@@ -28,31 +31,31 @@ export function buildReservationTable(
   const thead = document.createElement('thead');
   const headRow = document.createElement('tr');
   headRow.appendChild(document.createElement('th'));
-  for (const mode of MODES) {
+  for (const group of tier.modeGroups) {
     const th = document.createElement('th');
-    th.textContent = mode.label;
+    th.textContent = group.label;
     headRow.appendChild(th);
   }
   thead.appendChild(headRow);
   table.appendChild(thead);
 
   const tbody = document.createElement('tbody');
-  for (const band of BANDS) {
+  for (const band of tier.bands) {
     const row = document.createElement('tr');
     const label = document.createElement('th');
     label.textContent = band.label;
     row.appendChild(label);
 
-    for (const mode of MODES) {
-      const key = reservationKey(station, band.id, mode.id);
+    for (const group of tier.modeGroups) {
+      const key = reservationKey(station, band.id, group.id);
       const reservation = reservations.get(key);
       const holder = reservation?.operatorCall ?? null;
       const onClaim = () => {
         if (reservation) return; // occupied, ignore click (handled via release button in cell)
-        opts.onClaim?.(band.id, mode.id);
+        opts.onClaim?.(band.id, group.id);
       };
       const onRelease =
-        !opts.readOnly && reservation && reservation.operatorCall === you ? () => opts.onRelease?.(band.id, mode.id) : undefined;
+        !opts.readOnly && reservation && reservation.operatorCall === you ? () => opts.onRelease?.(band.id, group.id) : undefined;
       row.appendChild(makeCell(holder, opts.readOnly ? null : you, onClaim, onRelease, opts.readOnly));
     }
     tbody.appendChild(row);
@@ -96,13 +99,19 @@ export function render(container: HTMLElement, _isNewMount: boolean): void {
 
   for (const stationId of stations) {
     wrapper.appendChild(stationHeading(stationId, config?.stationParks[stationId]));
-    wrapper.appendChild(
-      buildReservationTable(stationId, state.data.reservations, you, {
-        readOnly: false,
-        onClaim: (band, mode) => send({ type: 'reserve', band, mode, station: stationId }),
-        onRelease: (band, mode) => send({ type: 'release', station: stationId, band, mode }),
-      }),
-    );
+    for (const tier of BAND_TIERS) {
+      const tierHeading = document.createElement('h3');
+      tierHeading.className = 'grid-tier-heading';
+      tierHeading.textContent = tier.label;
+      wrapper.appendChild(tierHeading);
+      wrapper.appendChild(
+        buildReservationTable(stationId, tier, state.data.reservations, you, {
+          readOnly: false,
+          onClaim: (band, mode) => send({ type: 'reserve', band, mode, station: stationId }),
+          onRelease: (band, mode) => send({ type: 'release', station: stationId, band, mode }),
+        }),
+      );
+    }
   }
 
   container.appendChild(wrapper);

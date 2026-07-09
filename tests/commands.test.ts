@@ -334,6 +334,42 @@ describe('reserve', () => {
   });
 });
 
+describe('DIGI reservation group vs exact mode', () => {
+  test('a DIGI reservation lets the operator log FT8 and FT4 QSOs under the same slot', async () => {
+    const deps = await makeDeps();
+    const conn = await signIn(deps, 'W1OP');
+    await dispatch(deps, conn, { type: 'reserve', band: '20m', mode: 'DIGI', station: 'R01' });
+
+    await dispatch(deps, conn, { type: 'qso:add', clientId: 'c1', qso: newQso({ mode: 'FT8', call: 'W2ABC' }) });
+    await dispatch(deps, conn, { type: 'qso:add', clientId: 'c2', qso: newQso({ mode: 'FT4', call: 'W3DEF' }) });
+
+    expect(lastRejects(conn)).toHaveLength(0);
+    expect(deps.ctx.state.qsos.size).toBe(2);
+  });
+
+  test('logging an exact mode whose group is not held is NOT_YOUR_SLOT', async () => {
+    const deps = await makeDeps();
+    const conn = await signIn(deps, 'W1OP');
+    await dispatch(deps, conn, { type: 'reserve', band: '20m', mode: 'SSB', station: 'R01' });
+    await dispatch(deps, conn, { type: 'qso:add', clientId: 'c1', qso: newQso({ mode: 'FT8' }) });
+    expect((lastRejects(conn)[0] as any).reason).toBe('NOT_YOUR_SLOT');
+  });
+
+  test('reserving the FM group on an HF band is rejected (no FM group on HF)', async () => {
+    const deps = await makeDeps();
+    const conn = await signIn(deps, 'W1OP');
+    await dispatch(deps, conn, { type: 'reserve', band: '20m', mode: 'FM', station: 'R01' });
+    expect((lastRejects(conn)[0] as any).reason).toBe('INVALID_BAND_MODE');
+  });
+
+  test('reserving the FM group on a VHF band succeeds', async () => {
+    const deps = await makeDeps();
+    const conn = await signIn(deps, 'W1OP');
+    await dispatch(deps, conn, { type: 'reserve', band: '2m', mode: 'FM', station: 'R01' });
+    expect(lastRejects(conn)).toHaveLength(0);
+  });
+});
+
 describe('buildFullState', () => {
   test('reflects the current config, operators, and seq', async () => {
     const deps = await makeDeps();

@@ -1,8 +1,8 @@
-import { BAND_IDS } from '../shared/bands.ts';
+import { BAND_IDS, modeGroupsForBand } from '../shared/bands.ts';
 import { checkDupe, normalizeCall, utcDateOf } from '../shared/dupe.ts';
 import { generateId } from '../shared/id.ts';
 import { applyEvent, reservationKey, type JournalEvent, type State } from '../shared/journal.ts';
-import { MODE_IDS } from '../shared/modes.ts';
+import { MODE_IDS, modeGroupOf } from '../shared/modes.ts';
 import type { ClientMessage, FullState, RejectReason, ServerMessage } from '../shared/protocol.ts';
 import type { Mode, Qso } from '../shared/types.ts';
 import { isValidParkNumber } from '../shared/validate.ts';
@@ -81,7 +81,10 @@ export async function handleReserve(
   msg: Extract<ClientMessage, { type: 'reserve' }>,
 ): Promise<void> {
   if (!conn.operatorCall) return reject(conn, 'NOT_SIGNED_IN');
-  if (!BAND_IDS.includes(msg.band) || !MODE_IDS.includes(msg.mode)) {
+  // msg.mode is a reservation *group* (SSB/CW/FM/DIGI, see modes.ts), not an
+  // exact mode -- and which groups exist depends on the band (no FM group on
+  // HF, see bands.ts's BAND_TIERS).
+  if (!BAND_IDS.includes(msg.band) || !modeGroupsForBand(msg.band).some((g) => g.id === msg.mode)) {
     return reject(conn, 'INVALID_BAND_MODE');
   }
   if (!isValidStation(deps, msg.station)) return reject(conn, 'INVALID_STATION');
@@ -152,7 +155,10 @@ export async function handleQsoAdd(
   if (!conn.operatorCall) return reject(conn, 'NOT_SIGNED_IN', msg.clientId, msg.type);
 
   const { band, mode, station } = msg.qso;
-  if (!BAND_IDS.includes(band) || !MODE_IDS.includes(mode as Mode)) {
+  // mode here is the exact detailed mode (e.g. FT8), unlike reserve/release
+  // where it's a group -- ADIF/dupe-checking always need the real mode. The
+  // reservation slot it belongs to is looked up by that mode's group below.
+  if (!BAND_IDS.includes(band) || !MODE_IDS.includes(mode as Mode) || !modeGroupsForBand(band).some((g) => g.id === modeGroupOf(mode))) {
     return reject(conn, 'INVALID_BAND_MODE', msg.clientId, msg.type);
   }
   if (!isValidStation(deps, station)) return reject(conn, 'INVALID_STATION', msg.clientId, msg.type);
@@ -175,7 +181,7 @@ export async function handleQsoAdd(
   if (dupe.status === 'BLOCKED_SELF') return reject(conn, 'BLOCKED_SELF', msg.clientId, msg.type);
   if (dupe.status === 'DUPE' && !msg.override) return reject(conn, 'DUPE_CONFIRM_REQUIRED', msg.clientId, msg.type);
 
-  const slotKey = reservationKey(station, band, mode);
+  const slotKey = reservationKey(station, band, modeGroupOf(mode));
   const reservation = deps.ctx.state.reservations.get(slotKey);
   if (!reservation || reservation.operatorCall !== conn.operatorCall) {
     return reject(conn, 'NOT_YOUR_SLOT', msg.clientId, msg.type);

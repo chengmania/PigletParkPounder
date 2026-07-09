@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parseParksCsv, readParks, syncParks } from '../src/server/parks-store.ts';
+import { importParksFromFile, parseParksCsv, readParks, syncParksFromUrl } from '../src/server/parks-store.ts';
 
 const dirsToClean: string[] = [];
 
@@ -44,19 +44,32 @@ describe('parseParksCsv', () => {
   });
 });
 
-describe('syncParks + readParks', () => {
+describe('syncParksFromUrl + readParks', () => {
   test('fetches, parses, and persists the cache; readParks reflects it', async () => {
     const dir = await makeTempDir();
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async () => new Response(SAMPLE_CSV, { status: 200 })) as unknown as typeof fetch;
     try {
-      const result = await syncParks(dir);
+      const result = await syncParksFromUrl(dir);
       expect(result.count).toBe(3);
 
       const cache = await readParks(dir);
       expect(cache.syncedAtUtc).not.toBeNull();
       expect(Object.keys(cache.parks)).toHaveLength(3);
       expect(cache.parks['US-0001']?.name).toBe('Acadia National Park');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('stamps the cache source with the URL that was actually used', async () => {
+    const dir = await makeTempDir();
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response(SAMPLE_CSV, { status: 200 })) as unknown as typeof fetch;
+    try {
+      await syncParksFromUrl(dir, 'https://example.com/mirror.csv');
+      const cache = await readParks(dir);
+      expect(cache.source).toBe('https://example.com/mirror.csv');
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -73,7 +86,28 @@ describe('syncParks + readParks', () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async () => new Response('', { status: 500 })) as unknown as typeof fetch;
     try {
-      await expect(syncParks(dir)).rejects.toThrow();
+      await expect(syncParksFromUrl(dir)).rejects.toThrow();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+describe('importParksFromFile', () => {
+  test('parses and persists an uploaded CSV without any network access', async () => {
+    const dir = await makeTempDir();
+    const originalFetch = globalThis.fetch;
+    // Prove no network call happens: fetch would throw if invoked.
+    globalThis.fetch = (async () => {
+      throw new Error('fetch should not be called for a file import');
+    }) as unknown as typeof fetch;
+    try {
+      const result = await importParksFromFile(dir, SAMPLE_CSV, 'my-parks.csv');
+      expect(result.count).toBe(3);
+
+      const cache = await readParks(dir);
+      expect(cache.parks['US-0001']?.name).toBe('Acadia National Park');
+      expect(cache.source).toBe('Uploaded file: my-parks.csv');
     } finally {
       globalThis.fetch = originalFetch;
     }

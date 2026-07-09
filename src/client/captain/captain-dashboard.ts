@@ -3,12 +3,12 @@ import { mountCaptainClubConfig } from './captain-clubconfig.ts';
 import { mountCaptainExports } from './captain-exports.ts';
 import { mountCaptainFirehose } from './captain-firehose.ts';
 import { mountCaptainGrid } from './captain-grid.ts';
-import { mountCaptainParks } from './captain-parks.ts';
+import { mountCaptainImports } from './captain-imports.ts';
 import { mountCaptainParkToPark } from './captain-park-to-park.ts';
 import { mountCaptainStats } from './captain-stats.ts';
 import { postJson } from './captain-api.ts';
 
-type SectionId = 'stats' | 'grid' | 'firehose' | 'p2p' | 'clubconfig' | 'parks' | 'exports';
+type SectionId = 'stats' | 'grid' | 'firehose' | 'p2p' | 'clubconfig' | 'imports' | 'exports';
 
 interface Section {
   id: SectionId;
@@ -22,7 +22,7 @@ const SECTIONS: Section[] = [
   { id: 'firehose', label: 'Live QSOs', mount: mountCaptainFirehose },
   { id: 'p2p', label: 'Park-to-Park', mount: mountCaptainParkToPark },
   { id: 'clubconfig', label: 'Club Setup', mount: mountCaptainClubConfig },
-  { id: 'parks', label: 'Parks', mount: mountCaptainParks },
+  { id: 'imports', label: 'Imports', mount: mountCaptainImports },
   { id: 'exports', label: 'Exports', mount: mountCaptainExports },
 ];
 

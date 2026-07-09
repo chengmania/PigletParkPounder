@@ -1,10 +1,11 @@
 import { BANDS } from '../../shared/bands.ts';
 import { checkDupe, utcDateOf } from '../../shared/dupe.ts';
 import { generateId } from '../../shared/id.ts';
-import { defaultRst, MODES } from '../../shared/modes.ts';
+import { defaultRst, getModeGroup, modesInGroup, MODES } from '../../shared/modes.ts';
 import type { Mode, Qso, Reservation, StationKind } from '../../shared/types.ts';
 import { isValidParkList, splitParkList } from '../../shared/validate.ts';
 import { fillDatalist } from '../autocomplete.ts';
+import { mountCallsignResolvedBubble } from '../callsign-bubble.ts';
 import { describeDupe } from '../dupe-live.ts';
 import { buildIdentity } from '../log-model.ts';
 import { mountParkResolvedBubble } from '../park-bubble.ts';
@@ -17,7 +18,10 @@ import { onQsoAddOutcome, send } from '../ws-client.ts';
 interface Context {
   station: StationKind;
   band: string;
-  mode: Mode;
+  // A reservation slot claimed on the grid, e.g. "SSB"/"CW"/"FM"/"DIGI" --
+  // not necessarily the exact ADIF mode that ends up on the QSO (see
+  // resolveMode/digiMode below for the DIGI case).
+  modeGroup: string;
 }
 
 interface Els {
@@ -25,6 +29,7 @@ interface Els {
   contextRow: HTMLElement;
   contextSelect: HTMLSelectElement | null;
   contextLabel: HTMLElement;
+  digiModeRow: HTMLElement;
   callInput: HTMLInputElement;
   rstSentInput: HTMLInputElement;
   rstRcvdInput: HTMLInputElement;
@@ -41,14 +46,27 @@ let els: Els | null = null;
 let unsubscribeOutcomes: (() => void) | null = null;
 let lastReservationKeys = '';
 let editingId: string | null = null;
+// Sticky across QSOs (not reset per-submit, unlike call/state/park) -- a
+// digital operator logging a run of contacts is usually running one
+// submode at a time, not switching every QSO.
+let digiMode: Mode = 'FT8';
 
 function contextKey(r: Pick<Reservation, 'station' | 'band' | 'mode'>): string {
   return `${r.station}|${r.band}|${r.mode}`;
 }
 
 function parseContextKey(key: string): Context {
-  const [station, band, mode] = key.split('|');
-  return { station: station!, band: band!, mode: mode! };
+  const [station, band, modeGroup] = key.split('|');
+  return { station: station!, band: band!, modeGroup: modeGroup! };
+}
+
+// The reservation grid claims a mode *group* (SSB/CW/FM/DIGI); everywhere
+// else (ADIF, dupe key) needs the exact mode. SSB/CW/FM map 1:1 to
+// themselves; DIGI resolves to whichever submode the operator picked in the
+// Digi Mode dropdown.
+function resolveMode(modeGroup: string): Mode {
+  const members = modesInGroup(modeGroup);
+  return members.length === 1 ? members[0]!.id : digiMode;
 }
 
 // Wraps an input with a small visible label above it -- unlike a bare
@@ -95,6 +113,10 @@ function buildForm(container: HTMLElement): void {
   contextRow.className = 'log-context-select';
   root.appendChild(contextRow);
 
+  const digiModeRow = document.createElement('div');
+  digiModeRow.className = 'log-digimode-row';
+  root.appendChild(digiModeRow);
+
   const form = document.createElement('form');
   form.className = 'log-form';
 
@@ -106,7 +128,9 @@ function buildForm(container: HTMLElement): void {
   callInput.autofocus = true;
   callInput.autocomplete = 'off';
   callInput.className = 'log-call-input';
-  entryRow.appendChild(labeledField('Call', callInput, 'log-field-call'));
+  const callField = labeledField('Call', callInput, 'log-field-call');
+  callField.appendChild(mountCallsignResolvedBubble(callInput));
+  entryRow.appendChild(callField);
 
   const rstSentInput = document.createElement('input');
   rstSentInput.className = 'log-rst-input';
@@ -175,6 +199,7 @@ function buildForm(container: HTMLElement): void {
     contextRow,
     contextSelect: null,
     contextLabel,
+    digiModeRow,
     callInput,
     rstSentInput,
     rstRcvdInput,
@@ -249,19 +274,21 @@ function buildContextSelector(contextRow: HTMLElement): void {
     for (const r of reservations) {
       const opt = document.createElement('option');
       opt.value = contextKey(r);
-      opt.textContent = `${r.station} ${r.band} ${r.mode}`;
+      opt.textContent = `${r.station} ${r.band} ${getModeGroup(r.mode)?.label ?? r.mode}`;
       select.appendChild(opt);
     }
     select.addEventListener('change', () => {
       resetRstDefaults();
       runDupeCheck();
       updateIdentityBar();
+      updateDigiModeUI();
     });
     contextRow.appendChild(select);
     els.contextSelect = select;
   }
 
   resetRstDefaults();
+  updateDigiModeUI();
 }
 
 function getContext(): Context | null {
@@ -269,21 +296,52 @@ function getContext(): Context | null {
   if (reservations.length === 0) return null;
   if (els?.contextSelect) return parseContextKey(els.contextSelect.value);
   const r = reservations[0]!;
-  return { station: r.station, band: r.band, mode: r.mode };
+  return { station: r.station, band: r.band, modeGroup: r.mode };
+}
+
+// Rebuilds the Digi Mode dropdown (FT8/FT4/RTTY/PSK31) whenever it's
+// relevant -- only shown while the current context's reservation is the
+// DIGI group; hidden otherwise since SSB/CW/FM have nothing to pick between.
+function updateDigiModeUI(): void {
+  if (!els) return;
+  els.digiModeRow.innerHTML = '';
+  const ctx = getContext();
+  if (!ctx || ctx.modeGroup !== 'DIGI') return;
+
+  const label = document.createElement('label');
+  label.textContent = 'Digi Mode';
+  const select = document.createElement('select');
+  for (const m of modesInGroup('DIGI')) {
+    const opt = document.createElement('option');
+    opt.value = m.id;
+    opt.textContent = m.label;
+    if (m.id === digiMode) opt.selected = true;
+    select.appendChild(opt);
+  }
+  select.addEventListener('change', () => {
+    digiMode = select.value;
+    resetRstDefaults();
+    runDupeCheck();
+    updateIdentityBar();
+  });
+  label.appendChild(select);
+  els.digiModeRow.appendChild(label);
 }
 
 function resetRstDefaults(): void {
   if (!els) return;
   const ctx = getContext();
   if (!ctx) return;
-  els.rstSentInput.value = defaultRst(ctx.mode);
-  els.rstRcvdInput.value = defaultRst(ctx.mode);
+  const mode = resolveMode(ctx.modeGroup);
+  els.rstSentInput.value = defaultRst(mode);
+  els.rstRcvdInput.value = defaultRst(mode);
 }
 
 function updateIdentityBar(): void {
   if (!els) return;
   const state = store.get();
-  const identity = buildIdentity(state.data.config, getContext());
+  const ctx = getContext();
+  const identity = buildIdentity(state.data.config, ctx ? { station: ctx.station, band: ctx.band, mode: resolveMode(ctx.modeGroup) } : null);
 
   els.identityBar.innerHTML = '';
   const parts = [identity.callsign || '—', identity.station || '—', identity.park || '—', identity.bandMode ?? '—'];
@@ -307,6 +365,7 @@ function runDupeCheck(): void {
 
   const state = store.get();
   const config = state.data.config;
+  const mode = resolveMode(ctx.modeGroup);
   const theirParkRaw = els.theirParkInput.value.trim();
   const parks = splitParkList(theirParkRaw);
   const dateUtc = utcDateOf(new Date().toISOString());
@@ -318,7 +377,7 @@ function runDupeCheck(): void {
   // the worst status across all of them so a BLOCKED/DUPE on any single
   // park still stops the whole submission before it happens.
   const results = (parks.length > 0 ? parks : [undefined]).map((theirPark) =>
-    checkDupe({ call, band: ctx.band, mode: ctx.mode, theirPark, dateUtc }, qsos, { clubCall }),
+    checkDupe({ call, band: ctx.band, mode, theirPark, dateUtc }, qsos, { clubCall }),
   );
   const worst =
     results.find((r) => r.status === 'BLOCKED_SELF') ?? results.find((r) => r.status === 'DUPE') ?? results[0]!;
@@ -347,9 +406,10 @@ function submitQso(): void {
     return;
   }
 
+  const mode = resolveMode(ctx.modeGroup);
   const override = els.logBtn.dataset.override === '1';
-  const rstSent = els.rstSentInput.value.trim() || defaultRst(ctx.mode);
-  const rstRcvd = els.rstRcvdInput.value.trim() || defaultRst(ctx.mode);
+  const rstSent = els.rstSentInput.value.trim() || defaultRst(mode);
+  const rstRcvd = els.rstRcvdInput.value.trim() || defaultRst(mode);
   const theirState = els.theirStateInput.value.trim().toUpperCase() || undefined;
   const parks = splitParkList(theirParkRaw);
 
@@ -367,7 +427,7 @@ function submitQso(): void {
     send({
       type: 'qso:add',
       clientId: generateId(),
-      qso: { station: ctx.station, band: ctx.band, mode: ctx.mode, call, rstSent, rstRcvd, theirPark, theirState },
+      qso: { station: ctx.station, band: ctx.band, mode, call, rstSent, rstRcvd, theirPark, theirState },
       override,
       queued: offline,
       clientTs,

@@ -1,3 +1,5 @@
+import { MODE_GROUPS, type ModeGroupDef } from './modes.ts';
+
 export interface BandDef {
   id: string;
   label: string;
@@ -33,4 +35,34 @@ export function getBand(id: string): BandDef | undefined {
 // "160m" -> "160M", "70cm" -> "70CM").
 export function toAdifBand(id: string): string {
   return id.toUpperCase();
+}
+
+const VHF_UHF_BAND_IDS = ['6m', '2m', '70cm'];
+
+export interface BandTier {
+  label: string;
+  bands: BandDef[];
+  modeGroups: ModeGroupDef[];
+}
+
+// The reservation grid is split into two tiers rather than one flat
+// band x mode-group matrix: FM is essentially never run on HF at a POTA
+// activation, so giving every HF row an FM column would just be dead cells
+// nobody uses. Splitting keeps each tier's grid to only the columns that
+// matter for those bands.
+export const BAND_TIERS: BandTier[] = [
+  {
+    label: 'HF Bands',
+    bands: BANDS.filter((b) => !VHF_UHF_BAND_IDS.includes(b.id)),
+    modeGroups: MODE_GROUPS.filter((g) => g.id !== 'FM'),
+  },
+  {
+    label: 'VHF/UHF Bands (6m-70cm)',
+    bands: BANDS.filter((b) => VHF_UHF_BAND_IDS.includes(b.id)),
+    modeGroups: MODE_GROUPS,
+  },
+];
+
+export function modeGroupsForBand(bandId: string): ModeGroupDef[] {
+  return (BAND_TIERS.find((t) => t.bands.some((b) => b.id === bandId)) ?? BAND_TIERS[0]!).modeGroups;
 }

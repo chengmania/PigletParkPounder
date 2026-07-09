@@ -1,3 +1,4 @@
+import { BAND_TIERS } from '../../shared/bands.ts';
 import { buildReservationTable } from '../screens/grid.ts';
 import { store } from '../store.ts';
 
@@ -26,7 +27,13 @@ export function mountCaptainGrid(container: HTMLElement): () => void {
       const heading = document.createElement('h2');
       heading.textContent = stationId;
       body.appendChild(heading);
-      body.appendChild(buildReservationTable(stationId, state.data.reservations, null, { readOnly: true }));
+      for (const tier of BAND_TIERS) {
+        const tierHeading = document.createElement('h3');
+        tierHeading.className = 'grid-tier-heading';
+        tierHeading.textContent = tier.label;
+        body.appendChild(tierHeading);
+        body.appendChild(buildReservationTable(stationId, tier, state.data.reservations, null, { readOnly: true }));
+      }
     }
   }
 

@@ -11,4 +11,9 @@ export interface ParkRecord {
 export interface ParksCache {
   syncedAtUtc: string | null;
   parks: Record<string, ParkRecord>;
+  // Where the current cache came from -- a URL it was downloaded from, or
+  // "Uploaded file: <name>" for a local CSV -- shown on the Captain's Parks
+  // tab so it's clear what's actually loaded. Absent for caches written
+  // before this field existed.
+  source?: string;
 }

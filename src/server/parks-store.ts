@@ -68,12 +68,32 @@ export function parseParksCsv(csvText: string): Record<string, ParkRecord> {
   return parks;
 }
 
-export async function syncParks(dataDir: string): Promise<{ count: number; syncedAtUtc: string }> {
-  const res = await fetch(PARKS_CSV_URL);
-  if (!res.ok) throw new Error(`Failed to fetch park list: HTTP ${res.status}`);
-  const csvText = await res.text();
+export { PARKS_CSV_URL };
+
+// Shared by both update paths (download-from-URL and upload-a-file) --
+// parses whatever CSV text was obtained and writes the cache, stamping
+// `source` so the Captain's Parks tab can show where the current data
+// actually came from.
+async function importParksCsv(dataDir: string, csvText: string, source: string): Promise<{ count: number; syncedAtUtc: string }> {
   const parks = parseParksCsv(csvText);
   const syncedAtUtc = new Date().toISOString();
-  await writeParks(dataDir, { syncedAtUtc, parks });
+  await writeParks(dataDir, { syncedAtUtc, parks, source });
   return { count: Object.keys(parks).length, syncedAtUtc };
+}
+
+// Downloads and imports the CSV from `url` (defaults to POTA's own export --
+// see PARKS_CSV_URL above). Needs the host to have internet access at the
+// moment this runs; the activation site itself stays offline as always.
+export async function syncParksFromUrl(dataDir: string, url: string = PARKS_CSV_URL): Promise<{ count: number; syncedAtUtc: string }> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Failed to fetch park list: HTTP ${res.status}`);
+  const csvText = await res.text();
+  return importParksCsv(dataDir, csvText, url);
+}
+
+// Imports a CSV the Captain already has locally (e.g. downloaded ahead of
+// time on a different machine, or a hand-edited/trimmed list) -- no network
+// access needed at all.
+export async function importParksFromFile(dataDir: string, csvText: string, fileName: string): Promise<{ count: number; syncedAtUtc: string }> {
+  return importParksCsv(dataDir, csvText, `Uploaded file: ${fileName}`);
 }

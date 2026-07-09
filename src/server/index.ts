@@ -2,6 +2,7 @@ import { networkInterfaces } from 'node:os';
 import { deleteAdmin, readAdmin } from './admin-store.ts';
 import { serveAdminApi } from './admin-http.ts';
 import { broadcast } from './broadcast.ts';
+import { serveCallsignsApi } from './callsigns-http.ts';
 import type { CommandDeps, ServerContext } from './commands.ts';
 import { serveJournalBackup, serveQr, serveStatic } from './http.ts';
 import { boot, writeSnapshot, writeSnapshotIfDue } from './journal-io.ts';
@@ -71,9 +72,13 @@ async function main() {
 
       // Checked before serveAdminApi: that handler's catch-all 404s any
       // unmatched /api/admin/* path, which would otherwise swallow
-      // /api/admin/parks/sync before it ever reaches parks-http.ts.
+      // /api/admin/parks/sync (and the callsigns equivalents below) before
+      // they ever reach parks-http.ts/callsigns-http.ts.
       const parksResponse = await serveParksApi(req, ctx);
       if (parksResponse) return parksResponse;
+
+      const callsignsResponse = await serveCallsignsApi(req, ctx);
+      if (callsignsResponse) return callsignsResponse;
 
       const adminResponse = await serveAdminApi(req, ctx);
       if (adminResponse) return adminResponse;
@@ -81,6 +86,9 @@ async function main() {
       return serveJournalBackup(req, dataDir) ?? serveQr(req, qrSvg) ?? serveStatic(req);
     },
     websocket: wsHandlers,
+    // Default is 128MB -- raised for the Captain's Callsigns "upload a file"
+    // path, since the real FCC amateur-license zip is ~175-200MB.
+    maxRequestBodySize: 300 * 1024 * 1024,
   });
 
   console.log(`PigletParkPounder listening on port ${port}`);
