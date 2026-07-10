@@ -11,7 +11,10 @@ export interface CallsignProvider {
   id: string;
   label: string;
   defaultUrl: string;
-  parse: (zipBytes: Uint8Array) => Record<string, CallsignRecord>;
+  // Async because the FCC parser yields to the event loop periodically
+  // (with a forced GC) to keep peak memory manageable on constrained
+  // hardware -- see src/server/callsigns-sources/fcc.ts for why.
+  parse: (zipBytes: Uint8Array) => Promise<Record<string, CallsignRecord>>;
 }
 
 // Add a new country here (plus a module under callsigns-sources/) and the
@@ -78,7 +81,7 @@ export async function readCallsigns(dataDir: string): Promise<CallsignsResponse>
 async function importZip(dataDir: string, providerId: string, zipBytes: Uint8Array, source: string): Promise<{ count: number; syncedAtUtc: string }> {
   const provider = getProvider(providerId);
   if (!provider) throw new Error(`Unknown callsign provider: ${providerId}`);
-  const callsigns = provider.parse(zipBytes);
+  const callsigns = await provider.parse(zipBytes);
   const syncedAtUtc = new Date().toISOString();
   const count = Object.keys(callsigns).length;
   const raw = await readRaw(dataDir);

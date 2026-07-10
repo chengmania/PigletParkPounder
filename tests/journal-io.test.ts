@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { readFile } from 'node:fs/promises';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { appendEvent, boot, writeSnapshot } from '../src/server/journal-io.ts';
 import type { JournalEvent } from '../src/shared/journal.ts';
-import { fold } from '../src/shared/journal.ts';
+import { createInitialState, fold } from '../src/shared/journal.ts';
 import type { Qso } from '../src/shared/types.ts';
 
 const dirsToClean: string[] = [];
@@ -88,5 +89,22 @@ describe('appendEvent + boot round trip', () => {
     const { state, seq } = await boot(dir);
     expect(seq).toBe(2);
     expect(state.qsos.size).toBe(2);
+  });
+});
+
+describe('writeSnapshot concurrency', () => {
+  test('overlapping calls never race on the shared tmp path (no ENOENT, valid JSON on disk)', async () => {
+    const dir = await makeTempDir();
+    const state = createInitialState();
+
+    // Mirrors the real crash: the periodic autosave timer and the shutdown
+    // handler both calling writeSnapshot around the same moment. Without
+    // serialization, whichever rename loses the race finds its tmp file
+    // already moved away by the other and throws ENOENT.
+    await Promise.all([writeSnapshot(dir, state, 1), writeSnapshot(dir, state, 2), writeSnapshot(dir, state, 3)]);
+
+    const raw = await readFile(join(dir, 'state.json'), 'utf8');
+    const parsed = JSON.parse(raw);
+    expect([1, 2, 3]).toContain(parsed.seq);
   });
 });

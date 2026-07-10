@@ -9,6 +9,25 @@ import { checkAdminCookie } from './session.ts';
 // non-zip file that happens to sneak under that cap.
 const MAX_UPLOAD_BYTES = 250 * 1024 * 1024;
 
+// Every operator tab hitting the Log screen calls this -- caching the
+// gzipped bytes avoids redoing a full JSON.stringify+gzip over tens of MB on
+// every single request, which matters on constrained hardware (e.g. a
+// Raspberry Pi) during a live activation. Keyed on each source's
+// syncedAtUtc so a sync/upload invalidates it automatically.
+let cachedGzip: { key: string; body: Uint8Array } | null = null;
+
+async function getCachedGzippedCallsigns(dataDir: string): Promise<Uint8Array> {
+  const cache = await readCallsigns(dataDir);
+  const key = Object.values(cache.sources)
+    .map((s) => `${s.label}:${s.syncedAtUtc}`)
+    .sort()
+    .join(',');
+  if (cachedGzip?.key !== key) {
+    cachedGzip = { key, body: gzipSync(JSON.stringify(cache)) };
+  }
+  return cachedGzip.body;
+}
+
 // GET /api/callsigns is intentionally public (not under /api/admin/) --
 // every operator's Log screen needs it for the callsign-resolved bubble,
 // not just the Captain. Only the update actions themselves are admin-gated.
@@ -16,13 +35,12 @@ export async function serveCallsignsApi(req: Request, ctx: ServerContext): Promi
   const url = new URL(req.url);
 
   if (url.pathname === '/api/callsigns' && req.method === 'GET') {
-    const cache = await readCallsigns(ctx.dataDir);
     // The full active-license cache runs tens of MB of JSON (an order of
     // magnitude bigger than the parks cache) -- gzip it; fetch() decompresses
     // transparently on every browser, and this JSON's heavy key repetition
     // (state abbreviations, common name tokens) compresses very well.
-    const body = gzipSync(JSON.stringify(cache));
-    return new Response(body, { headers: { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' } });
+    const body = await getCachedGzippedCallsigns(ctx.dataDir);
+    return new Response(new Uint8Array(body), { headers: { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' } });
   }
 
   if (url.pathname === '/api/admin/callsigns/sync' && req.method === 'POST') {

@@ -12,6 +12,88 @@ export const FCC_PROVIDER_LABEL = 'United States (FCC)';
 // decompressing them.
 export const FCC_ZIP_URL = 'https://data.fcc.gov/download/pub/uls/complete/l_amat.zip';
 
+// Everything below exists because of empirical findings while chasing an
+// OOM-kill of this import on a 2GB Raspberry Pi (confirmed via
+// `journalctl -k`: the kernel oom-killer fired twice, killing `bun` at
+// ~1.5-1.6GB resident). Measured against the real ~175MB FCC zip
+// (~1.69 million lines each in EN.dat/HD.dat), the naive approach --
+// decode each file to one big string, `text.split('\n')`, `line.split('|')`
+// per line -- peaked at ~3.9GB resident, even though the final retained data
+// (827k callsigns) is well under 300MB. Three separate effects stack up:
+//
+// 1. JavaScriptCore can return a "rope"/sliced string from split()/slice()/
+//    trim() that still references its entire parent string rather than
+//    copying. Retaining a single 20-char slice from an 800k-line/~240MB
+//    decoded text kept the whole ~240MB buffer resident even after a forced
+//    GC -- so every field we keep must be forced into a genuinely
+//    independent flat string (`flatten` below), or the whole source text
+//    stays pinned for the rest of the process. The classic V8
+//    `(' ' + s).slice(1)` trick measured no different from doing nothing;
+//    only a round-trip through raw bytes actually broke the reference.
+// 2. `text.split('\n')` materializes *every* line as a rope-slice into one
+//    array up front, so the parent text stays pinned for the entire loop
+//    regardless of (1). `iterLines` below yields one line at a time instead.
+// 3. `line.split('|')` allocates a full row's worth of columns (~18+) per
+//    line even though only 3-6 are ever used -- across ~1.7 million lines
+//    this generates transient garbage faster than JavaScriptCore's GC
+//    reclaims it within one uninterrupted synchronous loop, which by itself
+//    accounted for a large share of the peak. `columnsAt` only allocates the
+//    specific indices requested, and the parse loops yield to the event loop
+//    (with a forced GC) every 5,000 lines so collection can actually keep up
+//    -- as a side effect this also keeps the server responsive (able to
+//    service live QSO logging over the WebSocket) during the import instead
+//    of freezing for the whole multi-second parse.
+//
+// Together these took measured peak resident memory from ~3.9GB to ~1.8GB
+// against the real file -- fits (tightly) in the Pi's 1.8GB RAM + 2GB swap.
+const flattenEncoder = new TextEncoder();
+const flattenDecoder = new TextDecoder();
+function flatten(s: string): string {
+  return flattenDecoder.decode(flattenEncoder.encode(s));
+}
+
+function* iterLines(text: string): Generator<string> {
+  let start = 0;
+  while (start <= text.length) {
+    const nl = text.indexOf('\n', start);
+    if (nl === -1) {
+      if (start < text.length) yield text.slice(start);
+      break;
+    }
+    yield text.slice(start, nl);
+    start = nl + 1;
+  }
+}
+
+// Extracts only the requested (ascending) column indices from a pipe-
+// delimited line, instead of materializing every column via split('|').
+function columnsAt(line: string, indices: readonly number[]): string[] {
+  const values: string[] = new Array(indices.length).fill('');
+  const maxIndex = indices[indices.length - 1] ?? 0;
+  let col = 0;
+  let start = 0;
+  let nextWanted = 0;
+  while (col <= maxIndex) {
+    const pipe = line.indexOf('|', start);
+    const end = pipe === -1 ? line.length : pipe;
+    if (nextWanted < indices.length && indices[nextWanted] === col) {
+      values[nextWanted] = line.slice(start, end);
+      nextWanted++;
+    }
+    if (pipe === -1) break;
+    start = pipe + 1;
+    col++;
+  }
+  return values;
+}
+
+const YIELD_EVERY_N_LINES = 5_000;
+
+async function yieldToEventLoop(): Promise<void> {
+  Bun.gc(true);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 // EN.dat ("entity" record): one per license, name/address of the licensee.
 // 1-indexed pipe-delimited columns per FCC's public field definitions
 // (confirmed empirically against github.com/k3ng/hamdb's column mapping,
@@ -25,19 +107,24 @@ function composeName(entityName: string, first: string, mi: string, last: string
   return [first, mi ? `${mi}.` : '', last].filter(Boolean).join(' ');
 }
 
-export function parseEnDat(text: string): Map<string, { name: string; state?: string }> {
+const EN_COLUMNS = [1, 7, 8, 9, 10, 17] as const;
+
+export async function parseEnDat(text: string, onlyFccids?: Set<string>): Promise<Map<string, { name: string; state?: string }>> {
   const result = new Map<string, { name: string; state?: string }>();
-  for (const line of text.split('\n')) {
-    if (!line.trim()) continue;
-    const cols = line.split('|');
-    const fccid = cols[1];
-    if (!fccid) continue;
-    const entityName = (cols[7] ?? '').trim();
-    const first = (cols[8] ?? '').trim();
-    const mi = (cols[9] ?? '').trim();
-    const last = (cols[10] ?? '').trim();
-    const state = (cols[17] ?? '').trim() || undefined;
-    result.set(fccid, { name: composeName(entityName, first, mi, last), state });
+  let i = 0;
+  for (const line of iterLines(text)) {
+    if (line) {
+      const [fccid, entityNameRaw, firstRaw, miRaw, lastRaw, stateRaw] = columnsAt(line, EN_COLUMNS);
+      if (fccid && (!onlyFccids || onlyFccids.has(fccid))) {
+        const entityName = (entityNameRaw ?? '').trim();
+        const first = (firstRaw ?? '').trim();
+        const mi = (miRaw ?? '').trim();
+        const last = (lastRaw ?? '').trim();
+        const state = (stateRaw ?? '').trim() || undefined;
+        result.set(flatten(fccid), { name: flatten(composeName(entityName, first, mi, last)), state: state ? flatten(state) : undefined });
+      }
+    }
+    if (++i % YIELD_EVERY_N_LINES === 0) await yieldToEventLoop();
   }
   return result;
 }
@@ -46,16 +133,21 @@ export function parseEnDat(text: string): Map<string, { name: string; state?: st
 // col 2 = Unique System Identifier, col 5 = Call Sign, col 6 = License
 // Status ('A' = Active; anything else -- canceled, expired, terminated,
 // etc. -- is excluded here so a lapsed callsign never shows as if valid).
-export function parseHdDat(text: string): Map<string, string> {
+const HD_COLUMNS = [1, 4, 5] as const;
+
+export async function parseHdDat(text: string): Promise<Map<string, string>> {
   const result = new Map<string, string>();
-  for (const line of text.split('\n')) {
-    if (!line.trim()) continue;
-    const cols = line.split('|');
-    const fccid = cols[1];
-    const callSign = (cols[4] ?? '').trim();
-    const status = (cols[5] ?? '').trim();
-    if (!fccid || !callSign || status !== 'A') continue;
-    result.set(fccid, callSign.toUpperCase());
+  let i = 0;
+  for (const line of iterLines(text)) {
+    if (line) {
+      const [fccid, callSignRaw, statusRaw] = columnsAt(line, HD_COLUMNS);
+      const callSign = (callSignRaw ?? '').trim();
+      const status = (statusRaw ?? '').trim();
+      if (fccid && callSign && status === 'A') {
+        result.set(flatten(fccid), flatten(callSign.toUpperCase()));
+      }
+    }
+    if (++i % YIELD_EVERY_N_LINES === 0) await yieldToEventLoop();
   }
   return result;
 }
@@ -76,16 +168,22 @@ export function joinCallsigns(en: Map<string, { name: string; state?: string }>,
   return callsigns;
 }
 
-export function unzipEnAndHd(zipBytes: Uint8Array): { enText: string; hdText: string } {
-  const files = unzipSync(zipBytes, { filter: (file) => file.name === 'EN.dat' || file.name === 'HD.dat' });
-  const decoder = new TextDecoder();
-  const enBytes = files['EN.dat'];
-  const hdBytes = files['HD.dat'];
-  if (!enBytes || !hdBytes) throw new Error('ZIP did not contain both EN.dat and HD.dat');
-  return { enText: decoder.decode(enBytes), hdText: decoder.decode(hdBytes) };
+// Extracts and decodes exactly one entry from the zip. Deliberately processes
+// EN.dat and HD.dat one at a time (never both decompressed/decoded at once) --
+// each is well over a million lines of mostly-unused columns, and holding both
+// full texts live simultaneously is a large part of what OOM-killed this on a
+// 2GB Raspberry Pi.
+export function unzipAndDecodeOne(zipBytes: Uint8Array, fileName: string): string {
+  const files = unzipSync(zipBytes, { filter: (file) => file.name === fileName });
+  const bytes = files[fileName];
+  if (!bytes) throw new Error(`ZIP did not contain ${fileName}`);
+  return new TextDecoder().decode(bytes);
 }
 
-export function parseFccZip(zipBytes: Uint8Array): Record<string, CallsignRecord> {
-  const { enText, hdText } = unzipEnAndHd(zipBytes);
-  return joinCallsigns(parseEnDat(enText), parseHdDat(hdText));
+export async function parseFccZip(zipBytes: Uint8Array): Promise<Record<string, CallsignRecord>> {
+  // HD.dat first: its (compact) active-fccid set lets EN.dat skip every
+  // historical/inactive entity row instead of parsing and holding all of them.
+  const hd = await parseHdDat(unzipAndDecodeOne(zipBytes, 'HD.dat'));
+  const en = await parseEnDat(unzipAndDecodeOne(zipBytes, 'EN.dat'), new Set(hd.keys()));
+  return joinCallsigns(en, hd);
 }

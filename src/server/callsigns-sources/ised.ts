@@ -40,7 +40,10 @@ export function parseAmateurDelim(text: string): Record<string, CallsignRecord> 
   return callsigns;
 }
 
-export function parseIsedZip(zipBytes: Uint8Array): Record<string, CallsignRecord> {
+// Async only to match the shared CallsignProvider interface (the FCC
+// provider's parse is genuinely async) -- ISED's zip is a few MB, no
+// memory concerns here.
+export async function parseIsedZip(zipBytes: Uint8Array): Promise<Record<string, CallsignRecord>> {
   const files = unzipSync(zipBytes, { filter: (file) => file.name === ISED_DAT_FILENAME });
   const bytes = files[ISED_DAT_FILENAME];
   if (!bytes) throw new Error(`ZIP did not contain ${ISED_DAT_FILENAME}`);

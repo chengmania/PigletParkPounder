@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { strToU8, zipSync } from 'fflate';
-import { joinCallsigns, parseEnDat, parseHdDat, unzipEnAndHd } from '../src/server/callsigns-sources/fcc.ts';
+import { joinCallsigns, parseEnDat, parseFccZip, parseHdDat, unzipAndDecodeOne } from '../src/server/callsigns-sources/fcc.ts';
 import { parseAmateurDelim, parseIsedZip } from '../src/server/callsigns-sources/ised.ts';
 
 // Built with explicit column arrays (not hand-counted pipe strings) so a
@@ -47,25 +47,33 @@ const SAMPLE_HD = [
 ].join('\n');
 
 describe('FCC: parseEnDat', () => {
-  test('uses Entity Name when present (club/org licenses)', () => {
-    const en = parseEnDat(SAMPLE_EN);
+  test('uses Entity Name when present (club/org licenses)', async () => {
+    const en = await parseEnDat(SAMPLE_EN);
     expect(en.get('0001')).toEqual({ name: 'ARRL INC', state: 'CT' });
   });
 
-  test('composes First MI. Last when Entity Name is blank', () => {
-    const en = parseEnDat(SAMPLE_EN);
+  test('composes First MI. Last when Entity Name is blank', async () => {
+    const en = await parseEnDat(SAMPLE_EN);
     expect(en.get('0002')).toEqual({ name: 'JOHN Q. PUBLIC', state: 'ME' });
   });
 
-  test('composes First Last with no stray space when MI is blank', () => {
-    const en = parseEnDat(SAMPLE_EN);
+  test('composes First Last with no stray space when MI is blank', async () => {
+    const en = await parseEnDat(SAMPLE_EN);
     expect(en.get('0003')).toEqual({ name: 'JANE DOE', state: 'TX' });
+  });
+
+  test('onlyFccids filter drops rows whose fccid is not in the allowed set', async () => {
+    const en = await parseEnDat(SAMPLE_EN, new Set(['0001', '0003']));
+    expect(en.get('0001')).toEqual({ name: 'ARRL INC', state: 'CT' });
+    expect(en.get('0003')).toEqual({ name: 'JANE DOE', state: 'TX' });
+    expect(en.get('0002')).toBeUndefined();
+    expect(en.get('0004')).toBeUndefined();
   });
 });
 
 describe('FCC: parseHdDat', () => {
-  test('only active (status A) rows produce an entry', () => {
-    const hd = parseHdDat(SAMPLE_HD);
+  test('only active (status A) rows produce an entry', async () => {
+    const hd = await parseHdDat(SAMPLE_HD);
     expect(hd.get('0001')).toBe('W1AW');
     expect(hd.get('0002')).toBe('K1XYZ');
     expect(hd.get('0003')).toBeUndefined(); // Expired
@@ -73,28 +81,46 @@ describe('FCC: parseHdDat', () => {
 });
 
 describe('FCC: joinCallsigns', () => {
-  test('only active callsigns make it through, keyed by call sign', () => {
-    const callsigns = joinCallsigns(parseEnDat(SAMPLE_EN), parseHdDat(SAMPLE_HD));
+  test('only active callsigns make it through, keyed by call sign', async () => {
+    const callsigns = joinCallsigns(await parseEnDat(SAMPLE_EN), await parseHdDat(SAMPLE_HD));
     expect(Object.keys(callsigns).sort()).toEqual(['K1XYZ', 'K5ORPHAN', 'W1AW']);
     expect(callsigns['N0CALL']).toBeUndefined();
   });
 
-  test('an active HD record with no matching EN row falls back to the callsign itself', () => {
-    const callsigns = joinCallsigns(parseEnDat(SAMPLE_EN), parseHdDat(SAMPLE_HD));
+  test('an active HD record with no matching EN row falls back to the callsign itself', async () => {
+    const callsigns = joinCallsigns(await parseEnDat(SAMPLE_EN), await parseHdDat(SAMPLE_HD));
     expect(callsigns['K5ORPHAN']).toEqual({ name: 'K5ORPHAN', state: undefined });
   });
 });
 
-describe('FCC: unzipEnAndHd', () => {
-  test('extracts EN.dat and HD.dat, ignoring other .dat files in the zip', () => {
+describe('FCC: unzipAndDecodeOne', () => {
+  test('extracts a single named entry, ignoring other .dat files in the zip', () => {
     const zipBytes = zipSync({
       'EN.dat': strToU8(SAMPLE_EN),
       'HD.dat': strToU8(SAMPLE_HD),
       'AM.dat': strToU8('irrelevant, must be ignored'),
     });
-    const { enText, hdText } = unzipEnAndHd(zipBytes);
-    expect(enText).toBe(SAMPLE_EN);
-    expect(hdText).toBe(SAMPLE_HD);
+    expect(unzipAndDecodeOne(zipBytes, 'EN.dat')).toBe(SAMPLE_EN);
+    expect(unzipAndDecodeOne(zipBytes, 'HD.dat')).toBe(SAMPLE_HD);
+  });
+
+  test('throws if the requested file is not present', () => {
+    const zipBytes = zipSync({ 'EN.dat': strToU8(SAMPLE_EN) });
+    expect(() => unzipAndDecodeOne(zipBytes, 'HD.dat')).toThrow();
+  });
+});
+
+describe('FCC: parseFccZip', () => {
+  test('end-to-end: unzips, filters EN.dat by active fccids, and joins -- same result as before the sequential-processing refactor', async () => {
+    const zipBytes = zipSync({
+      'EN.dat': strToU8(SAMPLE_EN),
+      'HD.dat': strToU8(SAMPLE_HD),
+      'AM.dat': strToU8('irrelevant, must be ignored'),
+    });
+    const callsigns = await parseFccZip(zipBytes);
+    expect(Object.keys(callsigns).sort()).toEqual(['K1XYZ', 'K5ORPHAN', 'W1AW']);
+    expect(callsigns['W1AW']).toEqual({ name: 'ARRL INC', state: 'CT' });
+    expect(callsigns['N0CALL']).toBeUndefined();
   });
 });
 
@@ -139,12 +165,12 @@ describe('ISED: parseAmateurDelim', () => {
 });
 
 describe('ISED: parseIsedZip', () => {
-  test('extracts amateur_delim.txt, ignoring other files in the zip', () => {
+  test('extracts amateur_delim.txt, ignoring other files in the zip', async () => {
     const zipBytes = zipSync({
       'amateur_delim.txt': strToU8(SAMPLE_ISED),
       'readme_amat_delim.txt': strToU8('irrelevant, must be ignored'),
     });
-    const callsigns = parseIsedZip(zipBytes);
+    const callsigns = await parseIsedZip(zipBytes);
     expect(callsigns['VA1AA']?.name).toBe('Bill McFadden');
   });
 });

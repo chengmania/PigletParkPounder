@@ -121,7 +121,22 @@ export async function writeSnapshotIfDue(
   return now;
 }
 
-export async function writeSnapshot(dataDir: string, state: State, seq: number): Promise<void> {
+// Serialized through a single chain so overlapping callers (the periodic
+// autosave timer and the SIGINT/SIGTERM shutdown handler both call this) never
+// race on the shared tmp path -- clearInterval on shutdown only stops the
+// timer from firing again, it doesn't cancel an already in-flight write, so
+// without this a Ctrl+C landing mid-autosave could crash with an ENOENT on
+// rename (whichever call's rename lost the race found its tmp file already
+// moved away by the other).
+let snapshotChain: Promise<void> = Promise.resolve();
+
+export function writeSnapshot(dataDir: string, state: State, seq: number): Promise<void> {
+  const task = snapshotChain.then(() => doWriteSnapshot(dataDir, state, seq));
+  snapshotChain = task.catch(() => {});
+  return task;
+}
+
+async function doWriteSnapshot(dataDir: string, state: State, seq: number): Promise<void> {
   const snapshot: SnapshotFile = {
     formatVersion: 1,
     seq,
